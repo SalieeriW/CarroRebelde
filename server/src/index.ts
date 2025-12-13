@@ -3,11 +3,16 @@ import express from "express";
 import cors from "cors";
 import { Server } from "colyseus";
 import { GameRoom } from "./rooms/GameRoom";
+import os from "os";
 
 const port = Number(process.env.PORT || 2567);
 const app = express();
 
-app.use(cors());
+// CORS configuration - allow all origins for local network access
+app.use(cors({
+  origin: true, // Allow all origins
+  credentials: true
+}));
 app.use(express.json());
 
 const server = http.createServer(app);
@@ -48,5 +53,32 @@ app.get("/rooms", (req, res) => {
 // Export activeRooms map for GameRoom to use
 (global as any).activeRooms = activeRooms;
 
-gameServer.listen(port);
-console.log(`Listening on ws://localhost:${port}`);
+// Get local network IP address
+function getLocalIPAddress(): string {
+  const interfaces = os.networkInterfaces();
+  for (const name of Object.keys(interfaces)) {
+    const iface = interfaces[name];
+    if (!iface) continue;
+    for (const addr of iface) {
+      // Skip internal (loopback) and non-IPv4 addresses
+      if (addr.family === 'IPv4' && !addr.internal) {
+        return addr.address;
+      }
+    }
+  }
+  return 'localhost';
+}
+
+const localIP = getLocalIPAddress();
+
+// Listen on all network interfaces (0.0.0.0)
+// The HTTP server needs to listen, and Colyseus is already attached to it
+server.listen(port, '0.0.0.0', () => {
+  console.log(`\n🚀 Server is running!`);
+  console.log(`📡 Local network access:`);
+  console.log(`   ws://${localIP}:${port}`);
+  console.log(`   http://${localIP}:${port}`);
+  console.log(`\n💻 Local access:`);
+  console.log(`   ws://localhost:${port}`);
+  console.log(`   http://localhost:${port}\n`);
+});

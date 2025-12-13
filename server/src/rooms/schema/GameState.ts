@@ -12,6 +12,7 @@ export class Car extends Schema {
     @type("number") angle: number = 0;
     @type("number") speed: number = 0;
     @type("number") steeringValue: number = 0; // -1 to 1
+    @type("boolean") accelerating: boolean = false;
     @type("boolean") turboActive: boolean = false;
     @type("number") turboTimeLeft: number = 0;
     @type("boolean") controlsInverted: boolean = false;

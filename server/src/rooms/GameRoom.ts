@@ -9,54 +9,65 @@ const SAFE_WORDS = [
 ];
 
 export class GameRoom extends Room<GameState> {
-    maxClients = 4;
+    maxClients = 2;
     private challengeTimer: NodeJS.Timeout | null = null;
     private challengeInterval: NodeJS.Timeout | null = null;
     private trapEffects: Map<string, NodeJS.Timeout> = new Map();
     public roomCode: string = "";
 
     onCreate(options: any) {
-        this.setState(new GameState());
-        
-        // Generate room code
-        this.roomCode = this.generateRoomCode();
-        this.state.roomCode = this.roomCode;
-        
-        // Set start point (A)
-        this.state.startX = 0;
-        this.state.startZ = 0;
-        this.state.car.x = 0;
-        this.state.car.z = 0;
-        
-        // Set end point (B) - destination
-        this.state.endX = 200;
-        this.state.endZ = 200;
-        
-        // Generate road path with walls
-        this.generateRoadPath();
-        
-        // Store room info globally
-        if ((global as any).activeRooms) {
-            (global as any).activeRooms.set(this.roomId, {
-                roomId: this.roomId,
-                code: this.roomCode,
-                players: 0
-            });
-        }
-        
-        console.log("Room created with code:", this.roomCode);
+        try {
+            this.setState(new GameState());
+            
+            // Generate room code
+            this.roomCode = this.generateRoomCode();
+            this.state.roomCode = this.roomCode;
+            
+            // Set start point (A)
+            this.state.startX = 0;
+            this.state.startZ = 0;
+            this.state.car.x = 0;
+            this.state.car.z = 0;
+            
+            // Set end point (B) - destination
+            this.state.endX = 200;
+            this.state.endZ = 200;
+            
+            // Generate road path with walls
+            this.generateRoadPath();
+            
+            // Store room info globally
+            if ((global as any).activeRooms) {
+                (global as any).activeRooms.set(this.roomId, {
+                    roomId: this.roomId,
+                    code: this.roomCode,
+                    players: 0
+                });
+            }
+            
+            console.log("Room created with code:", this.roomCode);
 
-        // Game Loop (50ms = 20fps)
-        this.setSimulationInterval((deltaTime) => this.update(deltaTime), 50);
+            // Game Loop (50ms = 20fps)
+            this.setSimulationInterval((deltaTime) => this.update(deltaTime), 50);
+        } catch (error) {
+            console.error("Error in onCreate:", error);
+            throw error;
+        }
 
         // Input handling
         this.onMessage("input", (client, data) => {
-            if (this.state.gamePhase !== "playing") return;
-
+            console.log("INPUT RECEIVED:", JSON.stringify(data), "GamePhase:", this.state.gamePhase);
+            
             const player = this.state.players.get(client.sessionId);
-            if (!player) return;
+            if (!player) {
+                console.log("NO PLAYER FOUND for session:", client.sessionId);
+                return;
+            }
+            
+            console.log("Player role:", player.role);
 
             if (player.role === "driver") {
+                // Driver controls both steering and acceleration
                 if (data.steer !== undefined) {
                     let steerValue = data.steer;
                     // Invert controls if penalty active
@@ -65,32 +76,28 @@ export class GameRoom extends Room<GameState> {
                     }
                     this.state.car.steeringValue = steerValue;
                 }
-            } else if (player.role === "accelerator") {
                 if (data.accelerate !== undefined) {
-                    if (data.accelerate) {
-                        const baseAccel = 0.5;
-                        const turboMultiplier = this.state.car.turboActive ? 2 : 1;
-                        this.state.car.speed += baseAccel * turboMultiplier;
-                        // Cap max speed
-                        if (this.state.car.speed > 15) {
-                            this.state.car.speed = 15;
-                        }
-                    }
+                    // Set accelerating flag
+                    const oldValue = this.state.car.accelerating;
+                    this.state.car.accelerating = data.accelerate;
+                    console.log("ACCELERATING CHANGED:", oldValue, "->", data.accelerate, "Speed:", this.state.car.speed.toFixed(2));
                 }
+            } else {
+                console.log("NOT DRIVER, role is:", player.role);
             }
         });
 
-        // Copilot controls
+        // Navigator controls (horn and radio - navigator has copilot role too)
         this.onMessage("horn", (client, data) => {
             const player = this.state.players.get(client.sessionId);
-            if (player && player.role === "copilot") {
+            if (player && player.role === "navigator") {
                 this.state.hornActive = data.active || false;
             }
         });
 
         this.onMessage("radio", (client, data) => {
             const player = this.state.players.get(client.sessionId);
-            if (player && player.role === "copilot") {
+            if (player && player.role === "navigator") {
                 this.state.radioStation = data.station || "normal";
             }
         });
@@ -155,7 +162,8 @@ export class GameRoom extends Room<GameState> {
     }
 
     update(deltaTime: number) {
-        if (this.state.gamePhase === "lobby") return;
+        // Allow updates even in lobby for testing
+        // if (this.state.gamePhase === "lobby") return;
 
         const car = this.state.car;
         const deltaSeconds = deltaTime / 1000;
@@ -182,9 +190,34 @@ export class GameRoom extends Room<GameState> {
             }
         }
 
-        // Friction (car never stops completely, minimum speed)
-        car.speed *= 0.98;
-        if (car.speed < 0.1) car.speed = 0.1;
+        // Acceleration (apply continuously if accelerating)
+        // MUST be frame-rate independent - scale by deltaTime
+        // Higher acceleration rate to reach max speed quickly
+        const accelRate = 8 * deltaSeconds; // 8 units per second
+        if (car.accelerating) {
+            // Direct speed increase - scaled by deltaTime for frame-rate independence
+            car.speed += accelRate;
+            if (car.turboActive) {
+                car.speed += accelRate * 0.5; // Extra boost with turbo
+            }
+        } else {
+            // Apply friction/deceleration when not accelerating
+            // Hybrid approach: constant deceleration + small proportional component
+            // This ensures deceleration works at low speeds but isn't too aggressive at high speeds
+            const constantFriction = 3.0 * deltaSeconds; // Base constant deceleration (works at all speeds)
+            const proportionalFriction = car.speed * 0.02 * deltaSeconds; // Small proportional component (2% per second)
+            const totalFriction = constantFriction + proportionalFriction;
+            car.speed = Math.max(0, car.speed - totalFriction);
+            // Stop completely if speed is very low
+            if (car.speed < 0.1) car.speed = 0;
+        }
+        
+        // ALWAYS cap max speed at 100 - CRITICAL: Apply this EVERY frame
+        // Use Math.min to ensure it never exceeds 100
+        car.speed = Math.min(car.speed, 100);
+        
+        // Also enforce minimum speed
+        car.speed = Math.max(car.speed, 0.1);
 
         // Steering - apply steering value to angle
         const steeringSpeed = 0.08 * (car.speed > 0.1 ? 1 : 0);
@@ -194,18 +227,25 @@ export class GameRoom extends Room<GameState> {
         const oldX = car.x;
         const oldZ = car.z;
         
-        car.x += Math.sin(car.angle) * car.speed * deltaSeconds * 60;
-        car.z += Math.cos(car.angle) * car.speed * deltaSeconds * 60;
+        // Movement - frame-rate independent (scale by deltaSeconds)
+        car.x += Math.sin(car.angle) * car.speed * deltaSeconds;
+        car.z += Math.cos(car.angle) * car.speed * deltaSeconds;
 
-        // Check if car crashed (off road)
+        // Check if car crashed (off road) - enforce wall boundaries strictly
         if (!this.isOnRoad(car.x, car.z)) {
-            // Respawn at nearest road point
+            // Respawn at nearest road point immediately
             const respawnPoint = this.getNearestRoadPoint(car.x, car.z);
             car.x = respawnPoint.x;
             car.z = respawnPoint.z;
-            car.speed = 0.5; // Slow down after respawn
-            console.log("Car crashed! Respawned at", car.x, car.z);
+            // Reduce speed more significantly when hitting walls
+            car.speed *= 0.85; // Reduce by 15% when hitting walls
+            // Re-apply speed cap after crash
+            car.speed = Math.min(car.speed, 100);
         }
+        
+        // FINAL speed cap check - ALWAYS enforce at the end of update
+        car.speed = Math.min(car.speed, 100);
+        car.speed = Math.max(car.speed, 0.1);
 
         // Challenge portal collision
         if (this.state.challengePortalActive && this.state.gamePhase === "playing") {
@@ -253,6 +293,11 @@ export class GameRoom extends Room<GameState> {
                 this.state.traps.delete(key);
             }
         });
+        
+        // FINAL speed cap check - ALWAYS enforce at the very end of update
+        // This ensures speed never exceeds 100, no matter what happened during the frame
+        car.speed = Math.min(car.speed, 100);
+        car.speed = Math.max(car.speed, 0.1);
     }
 
     applyTrapEffect(type: string) {
@@ -308,6 +353,8 @@ export class GameRoom extends Room<GameState> {
 
         // Slow down car during challenge
         this.state.car.speed *= 0.3;
+        // Re-apply speed cap after challenge slowdown - use Math.min to ensure it's always capped
+        this.state.car.speed = Math.min(this.state.car.speed, 100);
 
         // Assign roles for challenge
         const players = Array.from(this.state.players.values());
@@ -392,28 +439,39 @@ export class GameRoom extends Room<GameState> {
     }
 
     onJoin(client: Client, options: any) {
-        console.log(client.sessionId, "joined!");
-        const player = new Player();
-        player.sessionId = client.sessionId;
-
-        // Role assignment
-        const roles = ["driver", "accelerator", "copilot", "navigator"];
-        const assignedRoles = Array.from(this.state.players.values()).map(p => p.role);
-        const availableRole = roles.find(r => !assignedRoles.includes(r)) || "spectator";
-
-        player.role = availableRole;
-        this.state.players.set(client.sessionId, player);
-        
-        // Update room info
-        if ((global as any).activeRooms) {
-            const roomInfo = (global as any).activeRooms.get(this.roomId);
-            if (roomInfo) {
-                roomInfo.players = this.state.players.size;
-                (global as any).activeRooms.set(this.roomId, roomInfo);
+        try {
+            console.log(client.sessionId, "joined!");
+            
+            if (!this.state) {
+                console.error("State is not initialized!");
+                throw new Error("Game state not initialized");
             }
+            
+            const player = new Player();
+            player.sessionId = client.sessionId;
+
+            // Role assignment (only 2 roles: driver and navigator)
+            const roles = ["driver", "navigator"];
+            const assignedRoles = Array.from(this.state.players.values()).map(p => p.role);
+            const availableRole = roles.find(r => !assignedRoles.includes(r)) || "spectator";
+
+            player.role = availableRole;
+            this.state.players.set(client.sessionId, player);
+            
+            // Update room info
+            if ((global as any).activeRooms) {
+                const roomInfo = (global as any).activeRooms.get(this.roomId);
+                if (roomInfo) {
+                    roomInfo.players = this.state.players.size;
+                    (global as any).activeRooms.set(this.roomId, roomInfo);
+                }
+            }
+            
+            console.log("Assigned role:", availableRole, "to", client.sessionId);
+        } catch (error) {
+            console.error("Error in onJoin:", error);
+            throw error;
         }
-        
-        console.log("Assigned role:", availableRole, "to", client.sessionId);
     }
 
     onLeave(client: Client, consented: boolean) {
@@ -486,19 +544,26 @@ export class GameRoom extends Room<GameState> {
         const centerZ = 100;
         const radiusX = 80;
         const radiusZ = 60;
-        const roadWidth = 8;
+        const roadWidth = 15; // Road width (half on each side)
         
-        const dx = (x - centerX) / (radiusX + roadWidth);
-        const dz = (z - centerZ) / (radiusZ + roadWidth);
-        const dist = dx * dx + dz * dz;
+        // Calculate normalized distance from center for outer boundary
+        const outerDx = (x - centerX) / (radiusX + roadWidth);
+        const outerDz = (z - centerZ) / (radiusZ + roadWidth);
+        const outerDist = outerDx * outerDx + outerDz * outerDz;
         
-        // Check if inside outer ellipse but outside inner ellipse
-        const outerDist = dx * dx + dz * dz;
+        // Check if outside outer ellipse (crashed - too far out)
+        if (outerDist > 1) return false;
+        
+        // Calculate normalized distance from center for inner boundary
         const innerDx = (x - centerX) / (radiusX - roadWidth);
         const innerDz = (z - centerZ) / (radiusZ - roadWidth);
         const innerDist = innerDx * innerDx + innerDz * innerDz;
         
-        return outerDist <= 1 && innerDist >= 1;
+        // Check if inside inner ellipse (crashed - too close to center)
+        if (innerDist < 1) return false;
+        
+        // Car is between inner and outer boundaries = on road
+        return true;
     }
 
     // Get nearest road point for respawn

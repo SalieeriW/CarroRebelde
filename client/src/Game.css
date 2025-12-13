@@ -344,6 +344,14 @@ body {
     margin: 20px;
 }
 
+.copilot-interior-canvas {
+    width: 100%;
+    height: 100%;
+    image-rendering: pixelated;
+    image-rendering: -moz-crisp-edges;
+    image-rendering: crisp-edges;
+}
+
 .interior-container-small {
     width: 100%;
     height: 400px;
@@ -591,6 +599,14 @@ body {
     align-items: center;
 }
 
+.accelerator-canvas {
+    width: 100%;
+    height: 100%;
+    image-rendering: pixelated;
+    image-rendering: -moz-crisp-edges;
+    image-rendering: crisp-edges;
+}
+
 .accelerator-layout {
     display: grid;
     grid-template-columns: 2fr 1fr;
@@ -752,6 +768,15 @@ body {
 /* Navigator View */
 .navigator-view {
     padding: 40px;
+}
+
+.navigator-layout {
+    display: grid;
+    grid-template-columns: 2fr 1fr;
+    gap: 20px;
+    max-width: 1600px;
+    width: 100%;
+    height: 80vh;
 }
 
 .map-container {

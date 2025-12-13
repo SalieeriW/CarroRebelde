@@ -5,12 +5,30 @@ import { DrawingCanvas } from "./components/DrawingCanvas";
 import { AudioSystem } from "./components/AudioSystem";
 import { Lobby } from "./components/Lobby";
 import { DriverView } from "./components/views/DriverView";
-import { CopilotView } from "./components/views/CopilotView";
-import { AcceleratorView } from "./components/views/AcceleratorView";
 import { NavigatorView } from "./components/views/NavigatorView";
 import "./Game.css";
 
-const client = new Colyseus.Client("ws://localhost:2567");
+// Get server URL from environment variable or use localhost
+// For local network access, set VITE_SERVER_URL=http://YOUR_IP:2567 in .env
+const getServerURL = () => {
+  // Check if we're in development or production
+  if (import.meta.env.VITE_SERVER_URL) {
+    return import.meta.env.VITE_SERVER_URL.replace('http://', 'ws://').replace('https://', 'wss://');
+  }
+  
+  // Try to detect if we're accessing from a mobile device or different host
+  const hostname = window.location.hostname;
+  
+  // If not localhost, assume we're accessing from network and use the same hostname
+  if (hostname !== 'localhost' && hostname !== '127.0.0.1') {
+    return `ws://${hostname}:2567`;
+  }
+  
+  // Default to localhost for local development
+  return "ws://localhost:2567";
+};
+
+const client = new Colyseus.Client(getServerURL());
 
 export const Game = () => {
     const [room, setRoom] = useState<Colyseus.Room<GameState> | null>(null);
@@ -33,47 +51,7 @@ export const Game = () => {
     const [endPoint, setEndPoint] = useState({ x: 100, z: 100 });
     const audioSystemRef = useRef<any>(null);
 
-    const handleCreateRoom = useCallback(async () => {
-        try {
-            console.log("Creating room...");
-            const r = await client.create<GameState>("game_room");
-            console.log("Created room", r.sessionId, "State:", r.state);
-            
-            setMySessionId(r.sessionId);
-            setRoom(r);
-            
-            // Set default state FIRST so something shows immediately
-            setGamePhase("lobby");
-            setRoomCode(r.state?.roomCode || "");
-            
-            // Set connected so we can render
-            setConnected(true);
-            
-            // Setup listeners - this will handle state updates
-            setupRoomListeners(r);
-            
-            console.log("Room created and connected, showing lobby");
-        } catch (e) {
-            console.error("Create room error", e);
-            alert("Error creating room: " + (e as Error).message);
-        }
-    }, [client]);
-
-    const handleJoinRoom = useCallback(async (roomId: string) => {
-        try {
-            const r = await client.joinById<GameState>(roomId);
-            console.log("Joined room", r.sessionId);
-            setRoom(r);
-            setMySessionId(r.sessionId);
-            setConnected(true);
-            setupRoomListeners(r);
-        } catch (e) {
-            console.error("Join room error", e);
-            alert("Failed to join room");
-        }
-    }, []);
-
-    const setupRoomListeners = (r: Colyseus.Room<GameState>) => {
+    const setupRoomListeners = useCallback((r: Colyseus.Room<GameState>) => {
         // Set initial state immediately if available
         const updateState = (state: GameState) => {
             if (!state) {
@@ -124,47 +102,122 @@ export const Game = () => {
 
             // Safely access traps
             if (state.traps && state.traps.forEach) {
-                const currentTraps: Trap[] = [];
-                state.traps.forEach((trap) => {
-                    currentTraps.push(trap);
+                const trapArray: Trap[] = [];
+                state.traps.forEach((trap, key) => {
+                    trapArray.push({
+                        id: key,
+                        x: trap.x,
+                        z: trap.z,
+                        type: trap.type,
+                        radius: trap.radius
+                    });
                 });
-                setTraps(currentTraps);
+                setTraps(trapArray);
+            }
+
+            if (state.challengePortalActive) {
+                setChallengePortal({
+                    x: state.challengePortalX,
+                    z: state.challengePortalZ,
+                    active: true
+                });
+            } else {
+                setChallengePortal({ x: 0, z: 0, active: false });
             }
 
             if (state.challenge) {
                 setChallenge(state.challenge);
             }
 
-            setChallengePortal({
-                x: state.challengePortalX || 0,
-                z: state.challengePortalZ || 0,
-                active: state.challengePortalActive || false
-            });
-
             setRadioStation(state.radioStation || "normal");
             setHornActive(state.hornActive || false);
-            
-            // Update start/end points for circuit
-            if (state.startX !== undefined && state.startZ !== undefined) {
-                setStartPoint({ x: state.startX, z: state.startZ });
-            }
-            if (state.endX !== undefined && state.endZ !== undefined) {
-                setEndPoint({ x: state.endX, z: state.endZ });
-            }
         };
-        
-        // Set initial state if available
+
+        // Set initial state
         if (r.state) {
-            console.log("Setting initial state from room.state");
             updateState(r.state);
         }
-        
+
         // Listen for state changes
         r.onStateChange((state) => {
-            console.log("State changed event");
             updateState(state);
         });
-    };
+
+        r.onError((code, message) => {
+            console.error("Room error:", code, message);
+        });
+
+        r.onLeave((code) => {
+            console.log("Left room:", code);
+            setConnected(false);
+            setRoom(null);
+        });
+    }, []);
+
+    const handleCreateRoom = useCallback(async () => {
+        try {
+            console.log("Creating room...");
+            console.log("Client URL:", getServerURL());
+            
+            // Check if client is properly initialized
+            if (!client) {
+                throw new Error("Client not initialized. Check server connection.");
+            }
+            
+            const r = await client.create<GameState>("game_room");
+            console.log("Created room", r.sessionId, "State:", r.state);
+            
+            if (!r) {
+                throw new Error("Room creation returned null");
+            }
+            
+            if (!r.state) {
+                throw new Error("Room created but state is missing. Server may not be running.");
+            }
+            
+            setMySessionId(r.sessionId);
+            setRoom(r);
+            
+            // Set default state FIRST so something shows immediately
+            setGamePhase("lobby");
+            setRoomCode(r.state?.roomCode || "");
+            
+            // Set connected so we can render
+            setConnected(true);
+            
+            // Setup listeners - this will handle state updates
+            setupRoomListeners(r);
+            
+            console.log("Room created and connected, showing lobby");
+        } catch (e) {
+            console.error("Create room error", e);
+            const errorMessage = e instanceof Error 
+                ? e.message 
+                : typeof e === 'string' 
+                    ? e 
+                    : e?.toString?.() || JSON.stringify(e) || "Unknown error - check server connection";
+            alert("Error creating room: " + errorMessage);
+        }
+    }, [setupRoomListeners]);
+
+    const handleJoinRoom = useCallback(async (roomId: string) => {
+        try {
+            const r = await client.joinById<GameState>(roomId);
+            console.log("Joined room", r.sessionId);
+            setRoom(r);
+            setMySessionId(r.sessionId);
+            setConnected(true);
+            setupRoomListeners(r);
+        } catch (e) {
+            console.error("Join room error", e);
+            const errorMessage = e instanceof Error 
+                ? e.message 
+                : typeof e === 'string' 
+                    ? e 
+                    : e?.toString?.() || JSON.stringify(e) || "Unknown error";
+            alert("Failed to join room: " + errorMessage);
+        }
+    }, [setupRoomListeners]);
 
     const handleSteer = useCallback((value: number) => {
         if (room) {
@@ -173,8 +226,11 @@ export const Game = () => {
     }, [room]);
 
     const handleAccelerate = useCallback((active: boolean) => {
-        if (room && active) {
-            room.send("input", { accelerate: true });
+        if (room) {
+            console.log("CLIENT: Sending accelerate:", active);
+            room.send("input", { accelerate: active });
+        } else {
+            console.log("CLIENT: No room, cannot send accelerate");
         }
     }, [room]);
 
@@ -287,27 +343,14 @@ export const Game = () => {
                 <DriverView
                     steeringValue={steeringValue}
                     onSteer={handleSteer}
+                    onAccelerate={handleAccelerate}
                     controlsInverted={carState.controlsInverted}
                     speed={carSpeed}
-                />
-            )}
-
-            {myRole === "copilot" && (
-                <CopilotView
-                    onHorn={handleHorn}
-                    onRadio={handleRadio}
-                    radioStation={radioStation}
-                    hornActive={hornActive}
-                    traps={traps}
-                    carPosition={carPosition}
-                />
-            )}
-
-            {myRole === "accelerator" && (
-                <AcceleratorView
-                    speed={carSpeed}
-                    onAccelerate={handleAccelerate}
                     turboActive={carState.turboActive}
+                    carPosition={carPosition}
+                    traps={traps}
+                    startPoint={startPoint}
+                    endPoint={endPoint}
                 />
             )}
 
@@ -319,6 +362,11 @@ export const Game = () => {
                     pathHistory={pathHistory}
                     startPoint={startPoint}
                     endPoint={endPoint}
+                    onHorn={handleHorn}
+                    onRadio={handleRadio}
+                    radioStation={radioStation}
+                    hornActive={hornActive}
+                    speed={carSpeed}
                 />
             )}
 
