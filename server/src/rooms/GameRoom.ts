@@ -126,6 +126,18 @@ export class GameRoom extends Room<GameState> {
             }
         });
 
+        // Audio chat signaling (WebRTC)
+        this.onMessage("audio_signal", (client, data) => {
+            // Forward signaling message to target player
+            const targetClient = Array.from(this.clients).find(c => c.sessionId === data.to);
+            if (targetClient) {
+                targetClient.send("audio_signal", {
+                    ...data,
+                    from: client.sessionId
+                });
+            }
+        });
+
         // Track circuit data from driver
         this.onMessage("track", (client, data) => {
             const player = this.state.players.get(client.sessionId);

@@ -3,6 +3,7 @@ import * as Colyseus from "colyseus.js";
 import { GameState } from "./schema/GameState";
 import { DrawingCanvas } from "./components/DrawingCanvas";
 import { AudioSystem } from "./components/AudioSystem";
+import { AudioChat } from "./components/AudioChat";
 import { Lobby } from "./components/Lobby";
 import { DriverView } from "./components/views/DriverView";
 import { NavigatorView } from "./components/views/NavigatorView";
@@ -524,6 +525,16 @@ export const Game = ({ preassignedRoom }: GameProps) => {
                 turboActive={carState.turboActive}
                 bgmEnabled={bgmEnabled}
             />
+
+            {/* Audio Chat - WebRTC voice chat */}
+            {room && connected && myRole && (
+                <AudioChat
+                    room={room}
+                    mySessionId={mySessionId}
+                    myRole={myRole}
+                    enabled={true}
+                />
+            )}
 
             {/* Race HUD - Pixel Art Style */}
             {gamePhase === "playing" && (
