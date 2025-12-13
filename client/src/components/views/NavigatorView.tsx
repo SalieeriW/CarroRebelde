@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useCallback, useState, type MouseEvent as ReactMouseEvent } from 'react';
 
 interface NavigatorViewProps {
     carPosition: { x: number; z: number; angle: number };
@@ -12,806 +12,795 @@ interface NavigatorViewProps {
     radioStation: string;
     hornActive: boolean;
     speed?: number;
+    trackData?: string; // JSON serializado del circuito del servidor
+    conesData?: string; // JSON serializado de los conos del Driver
+    bgmEnabled?: boolean; // BGM toggle state
+    onBgmToggle?: () => void; // BGM toggle handler
 }
 
-const OBSTACLE = {
-    NONE: 0,
-    ROCK: 1,
-    LOG: 2,
-    PUDDLE: 3,
-    HOLE: 4,
-    CONE: 5,
-    OIL: 6
+// --- CONFIGURACIร�N ---
+
+const VIEW_WIDTH = 800;
+const VIEW_HEIGHT = 600;
+
+// Configuraciรณn Visual
+
+const PALETTE = {
+  bg: '#050505', 
+  text: '#ffffff',
+  alert: '#ff0000',
+  
+  // Mundo Conductor
+  grass: '#0d1a0d',       
+  grassDetail: '#142b14', 
+  track: '#2a2a2a',       
+  trackBorder: '#d35400', // Naranja Seguridad
+  trackLine: '#cccccc',   
+  
+  carBody: '#d90429',
+  carRoof: '#1d3557',
+  headlight: 'rgba(220, 240, 255, 0.15)', 
+  
+  cone: '#ff6600',
+  coneStrip: '#ffffff',
+
+  // Decoraciones
+  fastFoodRed: '#d00000',
+  fastFoodYellow: '#ffcc00',
+  signMetal: '#a0a0a0',
+  signFace: '#eeeeee',
+  
+  // UI Copiloto (Estilo Retro)
+  dashWood: '#5d4037',
+  dashLeather: '#212121',
+  gpsBezel: '#333333',
+  gpsScreenOff: '#111',
+  gpsScreenOn: '#001a00', // Verde oscuro CRT
+  gpsRoad: '#00ff00',     // Verde fรณsforo
+  gpsObstacle: '#ffaa00', // Color obstaculos GPS
+  gpsCar: '#ff3333',
+  
+  radioBody: '#111',
+  radioDisplay: '#2b1b17', // Ambar apagado
+  radioText: '#ff8800',    // Ambar encendido
+  
+  hornBtn: '#b71c1c',
+  hornBtnLit: '#ff5252'
 };
 
-export const NavigatorView = ({ 
-    carPosition, 
-    traps, 
-    challengePortal, 
-    pathHistory, 
-    startPoint, 
-    endPoint, 
-    onHorn, 
-    onRadio, 
-    radioStation, 
-    hornActive,
-    speed = 0
-}: NavigatorViewProps) => {
-    const canvasRef = useRef<HTMLCanvasElement>(null);
-    const statusTextRef = useRef<HTMLDivElement>(null);
-    const [localState, setLocalState] = useState({
-        radioOn: true,
-        stationIndex: 0,
-        stations: ["FM 104.5", "AM 880", "AUX IN", "NO SIGNAL"],
-        switches: [true, false, true, false],
-        hornPressed: false
+const STATIONS = [
+  { name: "RETRO FM", color: "#ff8800", speed: 0.2 }, 
+  { name: "EUROBEAT", color: "#00ccff", speed: 0.8 }, 
+  { name: "LO-FI", color: "#cc88ff", speed: 0.1 }, 
+  { name: "STATIC", color: "#aaaaaa", speed: 2.0 }
+];
+
+const checkClick = (pos: {x: number, y: number}, rect: {x: number, y: number, w: number, h: number}) => {
+    return pos.x >= rect.x && pos.x <= rect.x + rect.w &&
+           pos.y >= rect.y && pos.y <= rect.y + rect.h;
+};
+
+// --- GENERADOR DE CIRCUITOS PROCEDURAL (MISMO QUE DRIVERVIEW) ---
+
+const generateProceduralTrack = () => {
+  const points = [];
+  const numPoints = 300; 
+  const baseRadius = 2500; 
+  
+  const layers = [];
+  const numLayers = 6;
+  
+  for(let i = 0; i < numLayers; i++) {
+      layers.push({
+          frequency: Math.floor(Math.random() * 10) + 2, 
+          phase: Math.random() * Math.PI * 2,
+          amplitude: (Math.random() * 800 + 400) / (i + 1.5) 
+      });
+  }
+
+  for (let i = 0; i < numPoints; i++) {
+    const angle = (i / numPoints) * Math.PI * 2;
+    let radiusOffset = 0;
+    
+    layers.forEach(layer => {
+        radiusOffset += Math.sin(angle * layer.frequency + layer.phase) * layer.amplitude;
     });
 
-    const palette = {
-        skyTop: '#1a1025',
-        skyBot: '#5d3e68',
-        sun: '#ff7755',
-        mountain: '#2a1a35',
-        dashBase: '#141414',
-        dashMid: '#1f1f1f',
-        dashLight: '#2a2a2a',
-        dashHighlight: '#444',
-        consoleBg: '#0a0a0a',
-        screenBg: '#001100',
-        screenLine: '#00ff44',
-        screenText: '#ccffcc',
-        screenWall: '#ff3333',
-        radioText: '#ffaa00',
-        btnRed: '#aa2222',
-        btnRedLit: '#ff4444',
-        btnRedDark: '#661111',
-        indicatorOn: '#00ff00',
-        indicatorOff: '#224422',
-        glovebox: '#181818',
-        vent: '#000000',
-        obsRock: '#888888',
-        obsLog: '#8B4513',
-        obsPuddle: '#4444ff',
-        obsHole: '#111111',
-        obsCone: '#ff6600',
-        obsOil: '#aa00aa'
-    };
+    const r = Math.max(800, baseRadius + radiusOffset);
+    
+    points.push({
+      x: Math.cos(angle) * r,
+      y: Math.sin(angle) * r
+    });
+  }
+  return points;
+};
 
-    // Random route generator with improved algorithm - no intersections
-    const generateRoute = (length = 4000, difficulty = 1) => {
-        const points: Array<{x: number, y: number, curve: number, angle: number, obstacle: number}> = [];
-        let cx = 0;
-        let cy = 0;
-        let angle = 0;
-        let lastAngle = 0;
-        
-        // Random seed-like behavior using simple math
-        let seed = Math.random() * 1000;
+const TRACK_WIDTH = 240; // Same as DriverView / Server procedural track width
 
-        for (let i = 0; i < length; i++) {
-            // Perlin-ish noise for smooth curves - reduced amplitude to prevent intersections
-            const noise1 = Math.sin((i + seed) * 0.02);
-            const noise2 = Math.sin((i + seed) * 0.005);
-            // Reduced curve strength to prevent self-intersections
-            let curve = (noise1 * 0.2 + noise2 * 0.3) * difficulty;
-            
-            // Smooth angle changes to prevent sharp turns that cause intersections
-            angle += curve * 0.05;
-            // Clamp angle changes to prevent too sharp turns
-            const angleDiff = angle - lastAngle;
-            if (Math.abs(angleDiff) > 0.3) {
-                angle = lastAngle + (angleDiff > 0 ? 0.3 : -0.3);
-            }
-            lastAngle = angle;
-            
-            cx += Math.cos(angle) * 10;
-            cy += Math.sin(angle) * 10;
+// --- COMPONENTE PRINCIPAL ---
 
-            // Obstacle Logic
-            let obstacle = OBSTACLE.NONE;
-            // Don't place obstacles at the start (first 100 points)
-            if (i > 100 && Math.random() > 0.96) {
-                const r = Math.random();
-                if (r < 0.16) obstacle = OBSTACLE.ROCK;
-                else if (r < 0.33) obstacle = OBSTACLE.LOG;
-                else if (r < 0.5) obstacle = OBSTACLE.PUDDLE;
-                else if (r < 0.66) obstacle = OBSTACLE.HOLE;
-                else if (r < 0.83) obstacle = OBSTACLE.CONE;
-                else obstacle = OBSTACLE.OIL;
-            }
-
-            points.push({
-                x: cx,
-                y: cy,
-                curve: curve,
-                angle: angle,
-                obstacle: obstacle
-            });
-        }
-        return points;
-    };
-
-    // Generate route on mount and store in ref
-    const trackPoints = useRef(generateRoute(5000, 1.2));
-    const carPosIndex = useRef(0);
-    const timeRef = useRef(0);
-
-    // Update car position index based on actual car position and movement
-    // This syncs the GPS view with the actual car movement
+export const NavigatorView = ({ 
+    carPosition,
+    onHorn,
+    onRadio,
+    radioStation,
+    hornActive,
+    speed = 0,
+    trackData = "",
+    conesData = "",
+    bgmEnabled = true,
+    onBgmToggle
+}: NavigatorViewProps) => {
+    const canvasRef = useRef<HTMLCanvasElement>(null);
+    const requestRef = useRef<number | undefined>(undefined);
+    
+    // Parsear los conos del Driver (recibidos del servidor)
+    const [cones, setCones] = useState<Array<{x: number, y: number}>>([]);
+    
     useEffect(() => {
-        // Find closest track point to actual car position for procedural track display
-        let minDist = Infinity;
-        let closestIndex = carPosIndex.current; // Start from current index for efficiency
-        
-        // Search around current position first (more efficient)
-        const searchRange = 200; // Increased search range
-        const startIdx = Math.max(0, Math.floor(carPosIndex.current) - searchRange);
-        const endIdx = Math.min(trackPoints.current.length, Math.floor(carPosIndex.current) + searchRange);
-        
-        for(let i = startIdx; i < endIdx; i++) {
-            const tp = trackPoints.current[i];
-            if (!tp) continue;
-            const dist = Math.sqrt(Math.pow(tp.x - carPosition.x, 2) + Math.pow(tp.y - carPosition.z, 2));
-            if(dist < minDist) {
-                minDist = dist;
-                closestIndex = i;
-            }
-        }
-        
-        // If not found in search range, do full search (shouldn't happen often)
-        if (minDist > 100) {
-            for(let i = 0; i < trackPoints.current.length; i++) {
-                const tp = trackPoints.current[i];
-                if (!tp) continue;
-                const dist = Math.sqrt(Math.pow(tp.x - carPosition.x, 2) + Math.pow(tp.y - carPosition.z, 2));
-                if(dist < minDist) {
-                    minDist = dist;
-                    closestIndex = i;
+        if (conesData) {
+            try {
+                const parsed = JSON.parse(conesData);
+                if (Array.isArray(parsed)) {
+                    setCones(parsed);
+                    console.log("NavigatorView: Received cones from server:", parsed.length);
                 }
+            } catch (e) {
+                console.error("Error parsing conesData:", e);
             }
         }
+    }, [conesData]);
+    
+    // Usar el circuito del servidor si está disponible, sino generar uno local como fallback
+    const getTrackPoints = useCallback(() => {
+        if (trackData) {
+            try {
+                const parsed = JSON.parse(trackData);
+                if (Array.isArray(parsed) && parsed.length > 0) {
+                    return parsed;
+                }
+            } catch (e) {
+                console.error("Error parsing trackData:", e);
+            }
+        }
+        // Fallback: generar circuito local si no hay datos del servidor
+        return generateProceduralTrack();
+    }, [trackData]);
+    
+    const [track, setTrack] = useState(getTrackPoints());
+    
+    // Actualizar el circuito cuando cambie trackData del servidor
+    useEffect(() => {
+        const newTrack = getTrackPoints();
+        setTrack(newTrack);
+    }, [trackData, getTrackPoints]);
+
+    // Zoom state for GPS - start with a close-up view that follows the car
+    const [zoomLevel, setZoomLevel] = useState(2); // 0 = full track, 1 = medium, 2 = close-up
+    
+    // Calculate zoom based on zoom level setting
+    const gpsZoom = useCallback(() => {
+        // Different zoom modes
+        const mapW = 440;
+        const mapH = 460;
         
-        // Smooth interpolation between old and new index to prevent jumping
-        const targetIndex = closestIndex;
-        const currentIndex = carPosIndex.current;
-        const diff = targetIndex - currentIndex;
-        
-        // If the difference is large, jump immediately (probably respawned or teleported)
-        if (Math.abs(diff) > 50) {
-            carPosIndex.current = targetIndex;
+        if (zoomLevel === 0) {
+            // Full track view
+            if (!track || track.length < 2) return 0.1;
+            let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+            for (const p of track) {
+                if (typeof p?.x !== "number" || typeof p?.y !== "number") continue;
+                minX = Math.min(minX, p.x);
+                maxX = Math.max(maxX, p.x);
+                minY = Math.min(minY, p.y);
+                maxY = Math.max(maxY, p.y);
+            }
+            const w = Math.max(1, maxX - minX);
+            const h = Math.max(1, maxY - minY);
+            const margin = TRACK_WIDTH * 2 + 20;
+            return Math.min(mapW / (w + margin), mapH / (h + margin)) * 0.9;
+        } else if (zoomLevel === 1) {
+            // Medium zoom - show area around car (~1500 units visible)
+            const viewRadius = 1500;
+            return Math.min(mapW, mapH) / (viewRadius * 2);
         } else {
-            // Smooth interpolation (0.5 = 50% towards target per update - faster response)
-            carPosIndex.current = currentIndex + diff * 0.5;
+            // Close-up zoom - show area around car (~600 units visible)
+            const viewRadius = 600;
+            return Math.min(mapW, mapH) / (viewRadius * 2);
         }
-    }, [carPosition, pathHistory]);
+    }, [track, zoomLevel]);
 
-    // Mouse interaction
+    const gameState = useRef({
+        // Estado Copiloto
+        radioIndex: 0,
+        hornActive: false,
+        time: 0,
+        
+        // UI Copiloto
+        radioVizHeight: Array(12).fill(0) as number[]
+    });
+
+    // Sync with server state
     useEffect(() => {
-        const canvas = canvasRef.current;
-        if (!canvas) return;
-
-        const hotspots = {
-            radioKnob: { x: 40, y: 265, r: 20 },
-            radioFace: { x: 20, y: 240, w: 140, h: 50 },
-            switch1: { x: 35, y: 310, w: 20, h: 40 },
-            switch2: { x: 70, y: 310, w: 20, h: 40 },
-            switch3: { x: 105, y: 310, w: 20, h: 40 },
-            switch4: { x: 140, y: 310, w: 20, h: 40 },
-            horn: { x: 90, y: 400, r: 35 }
-        };
-
-        const getMousePos = (evt: MouseEvent) => {
-            const rect = canvas.getBoundingClientRect();
-            const scaleX = canvas.width / rect.width;
-            const scaleY = canvas.height / rect.height;
-            return {
-                x: (evt.clientX - rect.left) * scaleX,
-                y: (evt.clientY - rect.top) * scaleY
-            };
-        };
-
-        const isInsideCircle = (pos: {x: number, y: number}, circle: {x: number, y: number, r: number}) => {
-            const dx = pos.x - circle.x;
-            const dy = pos.y - circle.y;
-            return (dx*dx + dy*dy) <= circle.r * circle.r;
-        };
-
-        const isInsideRect = (pos: {x: number, y: number}, rect: {x: number, y: number, w: number, h: number}) => {
-            return pos.x >= rect.x && pos.x <= rect.x + rect.w &&
-                   pos.y >= rect.y && pos.y <= rect.y + rect.h;
-        };
-
-        const handleMouseDown = (e: MouseEvent) => {
-            const pos = getMousePos(e);
-            let clicked = false;
-
-            if (isInsideCircle(pos, hotspots.horn)) {
-                setLocalState(prev => ({ ...prev, hornPressed: true }));
-                onHorn(true);
-                if (statusTextRef.current) {
-                    statusTextRef.current.innerText = "WARNING: HORN ACTIVE";
-                    statusTextRef.current.style.color = "red";
-                }
-                clicked = true;
-            }
-            else if (isInsideCircle(pos, hotspots.radioKnob)) {
-                setLocalState(prev => ({ ...prev, radioOn: !prev.radioOn }));
-                if (statusTextRef.current) {
-                    statusTextRef.current.innerText = localState.radioOn ? "RADIO: OFF" : "RADIO: ON";
-                    statusTextRef.current.style.color = "#444";
-                }
-                clicked = true;
-            }
-            else if (localState.radioOn && isInsideRect(pos, hotspots.radioFace)) {
-                setLocalState(prev => ({ 
-                    ...prev, 
-                    stationIndex: (prev.stationIndex + 1) % prev.stations.length 
-                }));
-                onRadio();
-                if (statusTextRef.current) {
-                    statusTextRef.current.innerText = "TUNING...";
-                }
-                clicked = true;
-            }
-            else if (isInsideRect(pos, hotspots.switch1)) { 
-                setLocalState(prev => ({ 
-                    ...prev, 
-                    switches: prev.switches.map((s, i) => i === 0 ? !s : s)
-                }));
-                clicked = true; 
-            }
-            else if (isInsideRect(pos, hotspots.switch2)) { 
-                setLocalState(prev => ({ 
-                    ...prev, 
-                    switches: prev.switches.map((s, i) => i === 1 ? !s : s)
-                }));
-                clicked = true; 
-            }
-            else if (isInsideRect(pos, hotspots.switch3)) { 
-                setLocalState(prev => ({ 
-                    ...prev, 
-                    switches: prev.switches.map((s, i) => i === 2 ? !s : s)
-                }));
-                clicked = true; 
-            }
-            else if (isInsideRect(pos, hotspots.switch4)) { 
-                setLocalState(prev => ({ 
-                    ...prev, 
-                    switches: prev.switches.map((s, i) => i === 3 ? !s : s)
-                }));
-                clicked = true; 
-            }
-        };
-
-        const handleMouseUp = () => {
-            if (localState.hornPressed) {
-                setLocalState(prev => ({ ...prev, hornPressed: false }));
-                onHorn(false);
-                if (statusTextRef.current) {
-                    statusTextRef.current.innerText = "System: ONLINE";
-                    statusTextRef.current.style.color = "#444";
-                }
-            }
-        };
-
-        const handleMouseLeave = () => {
-            if (localState.hornPressed) {
-                setLocalState(prev => ({ ...prev, hornPressed: false }));
-                onHorn(false);
-            }
-        };
-
-        canvas.addEventListener('mousedown', handleMouseDown);
-        canvas.addEventListener('mouseup', handleMouseUp);
-        canvas.addEventListener('mouseleave', handleMouseLeave);
-
-        return () => {
-            canvas.removeEventListener('mousedown', handleMouseDown);
-            canvas.removeEventListener('mouseup', handleMouseUp);
-            canvas.removeEventListener('mouseleave', handleMouseLeave);
-        };
-    }, [localState.radioOn, localState.hornPressed, onHorn, onRadio]);
-
-    // Sync horn state
-    useEffect(() => {
-        if (!hornActive && localState.hornPressed) {
-            setLocalState(prev => ({ ...prev, hornPressed: false }));
-        }
+        gameState.current.hornActive = hornActive;
     }, [hornActive]);
 
-    // Rendering loop
+    useEffect(() => {
+        // Map server radio station to index
+        const stationMap: { [key: string]: number } = {
+            "normal": 0,
+            "absurd1": 1,
+            "absurd2": 2,
+            "absurd3": 3
+        };
+        const idx = stationMap[radioStation] || 0;
+        gameState.current.radioIndex = idx;
+    }, [radioStation]);
+
+    const handleMouseDown = useCallback((e: ReactMouseEvent<HTMLCanvasElement>) => {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        
+        const rect = canvas.getBoundingClientRect();
+        const scaleX = canvas.width / rect.width;
+        const scaleY = canvas.height / rect.height;
+        const pos = {
+            x: (e.clientX - rect.left) * scaleX,
+            y: (e.clientY - rect.top) * scaleY
+        };
+
+        console.log("Mouse click at:", pos.x, pos.y); // Debug
+
+        // UI Layout (Coordenadas fijas del dibujo)
+        // Botรณn Horn (Redondo grande abajo derecha) - coordenadas: 640, 450, radio 60
+        const hornCX = 640;
+        const hornCY = 450;
+        const hornDist = Math.sqrt((pos.x - hornCX)**2 + (pos.y - hornCY)**2);
+        if (hornDist < 60) {
+            console.log("HORN clicked!");
+            gameState.current.hornActive = true;
+            onHorn(true);
+            return; // Early return to avoid checking other buttons
+        }
+        
+        // Radio (Arriba derecha) - coordenadas: 520, 100, width 240, height 140
+        const radX = 520;
+        const radY = 100;
+        const radW = 240;
+        const radH = 140;
+        
+        // Botรณn Prev (x: 520+20, y: 100+90, w: 60, h: 30)
+        if (checkClick(pos, { x: radX + 20, y: radY + 90, w: 60, h: 30 })) {
+            console.log("RADIO PREV clicked!");
+            const newIndex = (gameState.current.radioIndex - 1 + STATIONS.length) % STATIONS.length;
+            gameState.current.radioIndex = newIndex;
+            onRadio(); // Cycle radio
+            return;
+        }
+        
+        // Botรณn Next (x: 520+160, y: 100+90, w: 60, h: 30)
+        if (checkClick(pos, { x: radX + 160, y: radY + 90, w: 60, h: 30 })) {
+            console.log("RADIO NEXT clicked!");
+            const newIndex = (gameState.current.radioIndex + 1) % STATIONS.length;
+            gameState.current.radioIndex = newIndex;
+            onRadio(); // Cycle radio
+            return;
+        }
+        
+        // Zoom buttons on GPS (bottom of GPS screen)
+        const mapX = 40, mapY = 100, mapH = 460;
+        // Zoom Out button
+        if (checkClick(pos, { x: mapX + 10, y: mapY + mapH - 50, w: 40, h: 35 })) {
+            console.log("ZOOM OUT clicked!");
+            setZoomLevel(prev => Math.max(0, prev - 1));
+            return;
+        }
+        
+        // Zoom In button
+        if (checkClick(pos, { x: mapX + 60, y: mapY + mapH - 50, w: 40, h: 35 })) {
+            console.log("ZOOM IN clicked!");
+            setZoomLevel(prev => Math.min(2, prev + 1));
+            return;
+        }
+
+        // BGM Toggle button (below radio)
+        const bgmX = radX;
+        const bgmY = radY + radH + 10;
+        const bgmW = radW;
+        const bgmH = 40;
+        if (checkClick(pos, { x: bgmX, y: bgmY, w: bgmW, h: bgmH })) {
+            console.log("BGM TOGGLE clicked!");
+            if (onBgmToggle) {
+                onBgmToggle();
+            }
+            return;
+        }
+
+    }, [onHorn, onRadio, onBgmToggle]);
+
+    const handleMouseUp = useCallback(() => {
+        gameState.current.hornActive = false;
+        onHorn(false);
+    }, [onHorn]);
+
+    // --- RENDERIZADO COPILOTO ---
+
+    const drawCopilotUI = useCallback((ctx: CanvasRenderingContext2D, state: typeof gameState.current) => {
+        // 1. Salpicadero (Madera/Cuero)
+        ctx.fillStyle = PALETTE.dashLeather;
+        ctx.fillRect(0, 0, VIEW_WIDTH, VIEW_HEIGHT);
+        
+        // Panel de Madera (Parte superior)
+        ctx.fillStyle = PALETTE.dashWood;
+        ctx.fillRect(0, 0, VIEW_WIDTH, 80);
+        ctx.strokeStyle = '#000';
+        ctx.lineWidth = 4;
+        ctx.beginPath(); ctx.moveTo(0, 80); ctx.lineTo(VIEW_WIDTH, 80); ctx.stroke();
+
+        // --- 2. PANTALLA GPS (Izquierda) ---
+        const mapX = 40; const mapY = 100; const mapW = 440; const mapH = 460;
+        
+        // Marco GPS (Plรกstico rugoso)
+        ctx.fillStyle = PALETTE.gpsBezel;
+        ctx.fillRect(mapX-15, mapY-15, mapW+30, mapH+30);
+        // Tornillos
+        ctx.fillStyle = '#111';
+        ctx.fillRect(mapX-10, mapY-10, 6, 6);
+        ctx.fillRect(mapX+mapW+4, mapY-10, 6, 6);
+        ctx.fillRect(mapX-10, mapY+mapH+4, 6, 6);
+        ctx.fillRect(mapX+mapW+4, mapY+mapH+4, 6, 6);
+
+        // Pantalla CRT
+        ctx.save();
+        ctx.beginPath(); ctx.rect(mapX, mapY, mapW, mapH); ctx.clip();
+        
+        // Fondo Mapa (Grid Tรกctico)
+        ctx.fillStyle = PALETTE.gpsScreenOn;
+        ctx.fillRect(mapX, mapY, mapW, mapH);
+        
+        ctx.strokeStyle = 'rgba(0, 100, 0, 0.3)';
+        ctx.lineWidth = 1;
+        const gridSize = 40;
+        const gridOffX = (carPosition.x * 0.15) % gridSize;
+        const gridOffY = (carPosition.z * 0.15) % gridSize;
+        
+        for(let i=0; i<mapW+gridSize; i+=gridSize) {
+            ctx.beginPath(); ctx.moveTo(mapX + i - gridOffX, mapY); ctx.lineTo(mapX + i - gridOffX, mapY + mapH); ctx.stroke();
+        }
+        for(let i=0; i<mapH+gridSize; i+=gridSize) {
+            ctx.beginPath(); ctx.moveTo(mapX, mapY + i - gridOffY); ctx.lineTo(mapX + mapW, mapY + i - gridOffY); ctx.stroke();
+        }
+
+        // RENDERIZAR TRACK EN GPS (North Up)
+        const zoom = gpsZoom();
+        const gpsCX = mapX + mapW/2;
+        const gpsCY = mapY + mapH * 0.5; // Centrado (North Up)
+
+        ctx.translate(gpsCX, gpsCY);
+        // Sin rotacion para North Up
+        ctx.scale(zoom, zoom);
+        // Centrar en la posiciรณn del coche del servidor
+        ctx.translate(-carPosition.x, -carPosition.z);
+
+        // Pista - solo dibujar si hay datos válidos
+        if (track && track.length > 2 && track[0]?.x !== undefined) {
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            
+            // Outer border (red safety barrier)
+            ctx.strokeStyle = '#cc3300';
+            // NOTE: we already scaled the context (ctx.scale(zoom, zoom)),
+            // so lineWidth must stay in world units (do NOT divide by zoom).
+            ctx.lineWidth = (TRACK_WIDTH + 24);
+            ctx.beginPath();
+            ctx.moveTo(track[0].x, track[0].y);
+            for(let i=1; i<track.length; i++) ctx.lineTo(track[i].x, track[i].y);
+            ctx.closePath();
+            ctx.stroke();
+
+            // Road surface (green)
+            ctx.strokeStyle = PALETTE.gpsRoad;
+            ctx.lineWidth = TRACK_WIDTH;
+            ctx.beginPath();
+            ctx.moveTo(track[0].x, track[0].y);
+            for(let i=1; i<track.length; i++) ctx.lineTo(track[i].x, track[i].y);
+            ctx.closePath();
+            ctx.stroke();
+            
+            // Center line (dashed yellow)
+            ctx.strokeStyle = '#ffff00';
+            ctx.lineWidth = 6;
+            ctx.setLineDash([40, 40]);
+            ctx.beginPath();
+            ctx.moveTo(track[0].x, track[0].y);
+            for(let i=1; i<track.length; i++) ctx.lineTo(track[i].x, track[i].y);
+            ctx.closePath();
+            ctx.stroke();
+            ctx.setLineDash([]);
+            
+            // === FINISH LINE ===
+            if (track.length > 1) {
+                const p0 = track[0];
+                const p1 = track[1];
+                // Calculate direction
+                const dx = p1.x - p0.x;
+                const dy = p1.y - p0.y;
+                
+                // Draw checkered pattern
+                const numSquares = 8;
+                const squareSize = (TRACK_WIDTH + 20) / numSquares;
+                
+                ctx.save();
+                ctx.translate(p0.x, p0.y);
+                ctx.rotate(Math.atan2(dy, dx));
+                
+                for (let i = 0; i < numSquares; i++) {
+                    for (let j = 0; j < 2; j++) {
+                        const isWhite = (i + j) % 2 === 0;
+                        ctx.fillStyle = isWhite ? '#ffffff' : '#000000';
+                        ctx.fillRect(
+                            -squareSize + j * squareSize,
+                            -TRACK_WIDTH / 2 - 10 + i * squareSize,
+                            squareSize,
+                            squareSize
+                        );
+                    }
+                }
+                
+                // Add "FINISH" text
+                ctx.rotate(-Math.atan2(dy, dx)); // Reset rotation for text
+                ctx.fillStyle = '#ffd700';
+                ctx.font = `bold ${Math.max(20, TRACK_WIDTH * 0.15)}px monospace`;
+                ctx.textAlign = 'center';
+                ctx.fillText('🏁', 0, -TRACK_WIDTH / 2 - 30);
+                ctx.restore();
+            }
+        } else {
+            // No track data - draw a placeholder message
+            ctx.fillStyle = '#ff0000';
+            ctx.font = `${100/zoom}px monospace`;
+            ctx.textAlign = 'center';
+            ctx.fillText("NO TRACK DATA", carPosition.x, carPosition.z);
+            ctx.textAlign = 'left';
+        }
+
+        // OBSTACULOS EN GPS (Conos del Driver - mismas coordenadas que la pista)
+        // Los conos usan {x, y} igual que el track, donde y = server z
+        const coneSizes = [TRACK_WIDTH * 0.4, TRACK_WIDTH * 0.25, TRACK_WIDTH * 0.15];
+        const coneVisualRadius = coneSizes[zoomLevel] || TRACK_WIDTH * 0.15;
+        if (cones && cones.length > 0) {
+            cones.forEach(cone => {
+                // Coordenadas: cone.x y cone.y (mismo sistema que track)
+                const coneX = cone.x;
+                const coneY = cone.y; // y del cono = y del track = z del servidor
+                
+                // Draw cone with pulsing effect
+                const pulse = 1 + Math.sin(Date.now() / 200) * 0.2;
+                
+                // Outer glow
+                ctx.fillStyle = 'rgba(255, 100, 0, 0.3)';
+                ctx.beginPath();
+                ctx.arc(coneX, coneY, coneVisualRadius * 1.5 * pulse, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Main cone circle
+                ctx.fillStyle = PALETTE.gpsObstacle;
+                ctx.beginPath();
+                ctx.arc(coneX, coneY, coneVisualRadius, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Inner highlight
+                ctx.fillStyle = '#ffcc00';
+                ctx.beginPath();
+                ctx.arc(coneX, coneY, coneVisualRadius * 0.4, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Black outline
+                ctx.strokeStyle = '#000';
+                ctx.lineWidth = coneVisualRadius * 0.15;
+                ctx.beginPath();
+                ctx.arc(coneX, coneY, coneVisualRadius, 0, Math.PI * 2);
+                ctx.stroke();
+            });
+        }
+
+        // Icono Coche - tamaño según zoom level
+        const carSizes = [TRACK_WIDTH * 0.8, TRACK_WIDTH * 0.4, TRACK_WIDTH * 0.25];
+        const carSize = carSizes[zoomLevel] || TRACK_WIDTH * 0.25;
+        ctx.save();
+        ctx.translate(carPosition.x, carPosition.z);
+        
+        // Draw a circle background first for visibility
+        ctx.fillStyle = 'rgba(255, 50, 50, 0.4)';
+        ctx.beginPath();
+        ctx.arc(0, 0, carSize * 1.3, 0, Math.PI * 2);
+        ctx.fill();
+        
+        // Server uses: x += sin(angle), z += cos(angle)
+        // So angle=0 means moving in +Z direction (down on screen)
+        // The arrow points UP (-Y) in local coords
+        // To align with movement: rotation = PI - angle
+        ctx.rotate(Math.PI - carPosition.angle);
+        
+        // Car arrow icon - pointing in direction of movement
+        ctx.fillStyle = PALETTE.gpsCar;
+        ctx.beginPath();
+        ctx.moveTo(0, -carSize);           // Tip (front of car)
+        ctx.lineTo(-carSize * 0.5, carSize * 0.3);  // Left back
+        ctx.lineTo(-carSize * 0.3, carSize * 0.6);  // Left indent
+        ctx.lineTo(0, carSize * 0.3);      // Center back
+        ctx.lineTo(carSize * 0.3, carSize * 0.6);   // Right indent
+        ctx.lineTo(carSize * 0.5, carSize * 0.3);   // Right back
+        ctx.closePath();
+        ctx.fill();
+        
+        // Add a white outline for better visibility
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = carSize * 0.08;
+        ctx.stroke();
+        
+        // Direction indicator line (shows exactly where car is heading)
+        ctx.strokeStyle = '#00ff00';
+        ctx.lineWidth = carSize * 0.1;
+        ctx.beginPath();
+        ctx.moveTo(0, -carSize);
+        ctx.lineTo(0, -carSize * 2);
+        ctx.stroke();
+        
+        ctx.restore();
+        
+        ctx.restore(); // Fin GPS transform - volver a coordenadas de pantalla
+        
+        // Scanlines GPS
+        ctx.fillStyle = 'rgba(0, 255, 0, 0.1)';
+        for(let i=mapY; i<mapY+mapH; i+=4) ctx.fillRect(mapX, i, mapW, 2);
+
+        // Texto OSD
+        ctx.fillStyle = '#0f0';
+        ctx.font = '14px monospace';
+        ctx.fillText("NAV-SAT V1.0", mapX + 10, mapY + 25);
+        ctx.fillText(`SPD: ${Math.round(speed * 10)} KM/H`, mapX + 120, mapY + mapH - 15);
+        
+        // Info panel (right side)
+        ctx.textAlign = 'right';
+        ctx.fillText(`CONES: ${cones?.length || 0}`, mapX + mapW - 10, mapY + 25);
+        ctx.fillText(`ANG: ${Math.round(carPosition.angle * 180 / Math.PI)}°`, mapX + mapW - 10, mapY + 45);
+        // Debug: show first cone position if available
+        if (cones && cones.length > 0) {
+            const c = cones[0];
+            ctx.fillText(`C0: ${Math.round(c.x)},${Math.round(c.y)}`, mapX + mapW - 10, mapY + 65);
+        }
+        ctx.textAlign = 'left';
+        
+        // Zoom buttons (bottom left of GPS)
+        const zoomLabels = ['MAP', 'MED', 'CAR'];
+        // Zoom Out button (-)
+        ctx.fillStyle = '#333';
+        ctx.fillRect(mapX + 10, mapY + mapH - 50, 40, 35);
+        ctx.strokeStyle = '#0f0';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(mapX + 10, mapY + mapH - 50, 40, 35);
+        ctx.fillStyle = '#0f0';
+        ctx.font = 'bold 20px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText('-', mapX + 30, mapY + mapH - 27);
+        
+        // Zoom In button (+)
+        ctx.fillStyle = '#333';
+        ctx.fillRect(mapX + 60, mapY + mapH - 50, 40, 35);
+        ctx.strokeStyle = '#0f0';
+        ctx.strokeRect(mapX + 60, mapY + mapH - 50, 40, 35);
+        ctx.fillStyle = '#0f0';
+        ctx.fillText('+', mapX + 80, mapY + mapH - 27);
+        
+        // Current zoom level indicator
+        ctx.font = '12px monospace';
+        ctx.fillText(zoomLabels[zoomLevel] || 'CAR', mapX + 55, mapY + mapH - 55);
+        ctx.textAlign = 'left';
+
+        // Alerta Claxon
+        if (state.hornActive) {
+            ctx.fillStyle = 'rgba(255, 0, 0, 0.3)';
+            ctx.fillRect(mapX, mapY, mapW, mapH);
+            ctx.fillStyle = '#fff';
+            ctx.font = 'bold 40px monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText("ALERTA", mapX + mapW/2, mapY + mapH/2);
+            ctx.textAlign = 'left';
+        }
+
+        // --- 3. RADIO (Derecha Arriba) ---
+        const radX = 520; const radY = 100; const radW = 240; const radH = 140;
+        
+        // Cuerpo Radio
+        ctx.fillStyle = PALETTE.radioBody;
+        ctx.fillRect(radX, radY, radW, radH);
+        // Bordes cromados
+        ctx.strokeStyle = '#666';
+        ctx.lineWidth = 4;
+        ctx.strokeRect(radX, radY, radW, radH);
+        
+        // Pantalla LCD
+        ctx.fillStyle = PALETTE.radioDisplay;
+        ctx.fillRect(radX + 20, radY + 20, radW - 40, 50);
+        
+        // Texto LCD
+        const currentStation = STATIONS[state.radioIndex];
+        ctx.fillStyle = currentStation.color;
+        ctx.font = 'bold 20px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText(currentStation.name, radX + radW/2, radY + 52);
+        
+        // Visualizer
+        const bars = 12;
+        const barW = (radW - 50) / bars;
+        ctx.fillStyle = currentStation.color;
+        
+        // Actualizar visualizer data (simulado)
+        if (state.time % 5 === 0) {
+            state.radioVizHeight = state.radioVizHeight.map(() => Math.random() * 20);
+        }
+        
+        for(let i=0; i<bars; i++) {
+            const h = state.radioVizHeight[i] * currentStation.speed;
+            ctx.fillRect(radX + 25 + i*(barW+2), radY + 70 - h, barW, h);
+        }
+
+        // Botones Radio
+        ctx.fillStyle = '#333';
+        // Botรณn Prev
+        ctx.fillRect(radX + 20, radY + 90, 60, 30);
+        // Botรณn Next
+        ctx.fillRect(radX + 160, radY + 90, 60, 30);
+        
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 14px sans-serif';
+        ctx.fillText("<", radX + 50, radY + 110);
+        ctx.fillText(">", radX + 190, radY + 110);
+        
+        // Dial central
+        ctx.fillStyle = '#222';
+        ctx.beginPath(); ctx.arc(radX + radW/2, radY + 105, 15, 0, Math.PI*2); ctx.fill();
+        ctx.strokeStyle = '#555'; ctx.stroke();
+
+        // --- BGM Toggle (Below Radio) ---
+        const bgmX = radX;
+        const bgmY = radY + radH + 10;
+        const bgmW = radW;
+        const bgmH = 40;
+        
+        // BGM Button background
+        ctx.fillStyle = bgmEnabled ? '#2d5016' : '#333';
+        ctx.fillRect(bgmX, bgmY, bgmW, bgmH);
+        ctx.strokeStyle = bgmEnabled ? '#0f0' : '#666';
+        ctx.lineWidth = 3;
+        ctx.strokeRect(bgmX, bgmY, bgmW, bgmH);
+        
+        // BGM Text
+        ctx.fillStyle = bgmEnabled ? '#0f0' : '#888';
+        ctx.font = 'bold 16px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText(bgmEnabled ? '🎵 BGM ON' : '🔇 BGM OFF', bgmX + bgmW/2, bgmY + bgmH/2 + 6);
+
+        // --- 4. CLAXON (Derecha Abajo) ---
+        const hornCX = 640; 
+        const hornCY = 450;
+        const hornR = 60;
+        
+        // Base
+        ctx.fillStyle = '#333';
+        ctx.beginPath(); ctx.arc(hornCX, hornCY, hornR + 10, 0, Math.PI*2); ctx.fill();
+        
+        // Botรณn
+        ctx.fillStyle = state.hornActive ? PALETTE.hornBtnLit : PALETTE.hornBtn;
+        ctx.beginPath(); 
+        // Efecto pulsado (mรกs pequeรฑo si active)
+        const r = state.hornActive ? hornR - 5 : hornR;
+        ctx.arc(hornCX, hornCY, r, 0, Math.PI*2); 
+        ctx.fill();
+        
+        // Brillo botรณn
+        ctx.fillStyle = 'rgba(255,255,255,0.2)';
+        ctx.beginPath(); ctx.arc(hornCX - 20, hornCY - 20, 15, 0, Math.PI*2); ctx.fill();
+        
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 24px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText("HORN", hornCX, hornCY + 10);
+        
+        ctx.textAlign = 'left'; // Reset
+    }, [carPosition, cones, speed, hornActive, zoomLevel, gpsZoom, track, bgmEnabled]);
+
+    const draw = useCallback((ctx: CanvasRenderingContext2D) => {
+        // Clear canvas first
+        ctx.clearRect(0, 0, VIEW_WIDTH, VIEW_HEIGHT);
+        
+        const state = gameState.current;
+        state.time++;
+        drawCopilotUI(ctx, state);
+    }, [drawCopilotUI]);
+
+    const tick = useCallback(() => {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+        
+        ctx.imageSmoothingEnabled = false; 
+        draw(ctx);
+        requestRef.current = requestAnimationFrame(tick);
+    }, [draw]);
+
     useEffect(() => {
         const canvas = canvasRef.current;
         if (!canvas) return;
-
-        const ctx = canvas.getContext('2d');
-        if (!ctx) return;
-
-        canvas.width = 640;
-        canvas.height = 480;
-
-        let animationFrame: number;
-        let lastTime = 0;
-
-        const drawRect = (x: number, y: number, w: number, h: number, color: string) => {
-            ctx.fillStyle = color;
-            ctx.fillRect(Math.floor(x), Math.floor(y), Math.floor(w), Math.floor(h));
-        };
-
-        const drawBackground = () => {
-            let grad = ctx.createLinearGradient(0, 0, 0, 220);
-            grad.addColorStop(0, palette.skyTop);
-            grad.addColorStop(1, palette.skyBot);
-            ctx.fillStyle = grad;
-            ctx.fillRect(0, 0, 640, 240);
-
-            ctx.fillStyle = palette.sun;
-            ctx.beginPath();
-            ctx.arc(450, 200, 30, 0, Math.PI*2);
-            ctx.fill();
-
-            ctx.fillStyle = palette.mountain;
-            let scroll = timeRef.current * 1.5;
-            ctx.beginPath();
-            ctx.moveTo(0, 240);
-            for(let x=0; x<=640; x+=10) {
-                let h = Math.sin((x + scroll)*0.03) * 30 + 20;
-                h += Math.sin((x + scroll)*0.1) * 5;
-                ctx.lineTo(x, 240-h);
-            }
-            ctx.lineTo(640, 240);
-            ctx.fill();
-            
-            ctx.fillStyle = palette.dashBase;
-            ctx.beginPath();
-            ctx.moveTo(580, 0);
-            ctx.lineTo(640, 0);
-            ctx.lineTo(640, 480);
-            ctx.lineTo(550, 240);
-            ctx.fill();
-        };
-
-        const drawDashboard = () => {
-            ctx.fillStyle = palette.dashMid;
-            ctx.beginPath();
-            ctx.moveTo(0, 480);   
-            ctx.lineTo(0, 160);   
-            ctx.lineTo(180, 160); 
-            ctx.lineTo(640, 240); 
-            ctx.lineTo(640, 480); 
-            ctx.fill();
-
-            ctx.fillStyle = 'rgba(0,0,0,0.2)';
-            ctx.fillRect(180, 180, 460, 300);
-
-            ctx.strokeStyle = palette.dashHighlight;
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            ctx.moveTo(0, 162);
-            ctx.lineTo(180, 162);
-            ctx.lineTo(640, 242);
-            ctx.stroke();
-
-            const gX = 420; const gY = 320; const gW = 180; const gH = 100;
-            ctx.strokeStyle = '#000';
-            ctx.lineWidth = 2;
-            ctx.strokeRect(gX, gY, gW, gH);
-            
-            ctx.fillStyle = '#111';
-            ctx.fillRect(gX + gW/2 - 20, gY + 15, 40, 10);
-            ctx.fillStyle = '#333';
-            ctx.fillRect(gX + gW/2 - 5, gY + 18, 10, 4);
-
-            const vX = 580; const vY = 260;
-            ctx.fillStyle = palette.vent;
-            ctx.fillRect(vX, vY, 40, 30);
-            ctx.strokeStyle = '#333';
-            for(let i=0; i<3; i++) {
-                ctx.beginPath(); ctx.moveTo(vX, vY+5+i*8); ctx.lineTo(vX+40, vY+5+i*8); ctx.stroke();
-            }
-            ctx.strokeStyle = palette.dashHighlight;
-            ctx.strokeRect(vX, vY, 40, 30);
-        };
-
-        const drawCenterConsole = () => {
-            ctx.fillStyle = palette.consoleBg;
-            ctx.fillRect(0, 160, 180, 320);
-            ctx.strokeStyle = '#333';
-            ctx.beginPath(); ctx.moveTo(180, 160); ctx.lineTo(180, 480); ctx.stroke();
-
-            ctx.fillStyle = palette.vent;
-            ctx.fillRect(20, 180, 60, 30);
-            ctx.fillRect(90, 180, 60, 30);
-            ctx.strokeStyle = '#222';
-            for(let i=0; i<3; i++) {
-                ctx.beginPath(); ctx.moveTo(20, 185+i*8); ctx.lineTo(80, 185+i*8); ctx.stroke();
-                ctx.beginPath(); ctx.moveTo(90, 185+i*8); ctx.lineTo(150, 185+i*8); ctx.stroke();
-            }
-
-            const rX = 20; const rY = 240;
-            ctx.fillStyle = '#111';
-            ctx.fillRect(rX, rY, 140, 50);
-            
-            if (localState.radioOn) {
-                ctx.fillStyle = '#221100';
-                ctx.fillRect(rX+40, rY+10, 90, 30);
-                ctx.fillStyle = palette.radioText;
-                ctx.font = '10px monospace';
-                ctx.fillText(localState.stations[localState.stationIndex], rX+45, rY+28);
-            } else {
-                ctx.fillStyle = '#0a0500';
-                ctx.fillRect(rX+40, rY+10, 90, 30);
-            }
-
-            ctx.fillStyle = '#333';
-            ctx.beginPath(); ctx.arc(rX+20, rY+25, 12, 0, Math.PI*2); ctx.fill();
-            ctx.fillStyle = '#111';
-            let knobAngle = localState.radioOn ? timeRef.current * 0.1 : -0.5;
-            let kx = (rX+20) + Math.cos(knobAngle)*8;
-            let ky = (rY+25) + Math.sin(knobAngle)*8;
-            ctx.beginPath(); ctx.arc(kx, ky, 3, 0, Math.PI*2); ctx.fill();
-
-            const sX = 20; const sY = 310;
-            ctx.fillStyle = '#222';
-            ctx.fillRect(sX, sY, 140, 40);
-            
-            for(let i=0; i<4; i++) {
-                let on = localState.switches[i];
-                let swX = sX + 15 + (i*35);
-                ctx.fillStyle = '#666'; ctx.font = '8px sans-serif'; ctx.fillText("SW"+(i+1), swX-5, sY+35);
-                ctx.fillStyle = '#111'; ctx.fillRect(swX, sY+5, 10, 20);
-                ctx.fillStyle = on ? palette.indicatorOn : palette.indicatorOff;
-                ctx.fillRect(swX+2, sY + (on?5:15), 6, 10);
-            }
-
-            const bX = 50; const bY = 380;
-            ctx.fillStyle = '#1a1a1a';
-            ctx.fillRect(bX-10, bY-10, 100, 60);
-            ctx.strokeStyle = '#444';
-            ctx.strokeRect(bX-10, bY-10, 100, 60);
-
-            let pressOffset = localState.hornPressed ? 2 : 0;
-            let color = localState.hornPressed ? palette.btnRedLit : palette.btnRed;
-            let topColor = localState.hornPressed ? palette.btnRedLit : palette.btnRedLit;
-
-            ctx.fillStyle = color;
-            ctx.beginPath(); ctx.arc(bX+40, bY+20, 25, 0, Math.PI*2); ctx.fill();
-            
-            if (!localState.hornPressed) {
-                ctx.fillStyle = topColor;
-                ctx.beginPath(); ctx.arc(bX+40, bY+18, 20, 0, Math.PI*2); ctx.fill();
-            } else {
-                ctx.fillStyle = palette.btnRedDark;
-                ctx.beginPath(); ctx.arc(bX+40, bY+20, 20, 0, Math.PI*2); ctx.fill();
-            }
-            
-            ctx.fillStyle = '#fff';
-            ctx.textAlign = 'center';
-            ctx.font = 'bold 9px sans-serif';
-            ctx.fillText("HORN", bX+40, bY+21 + pressOffset);
-            ctx.textAlign = 'left';
-        };
-
-        const drawGPS = () => {
-            // Use latest car position from props (captured in closure)
-            const currentCarPos = {
-                x: carPosition.x,
-                y: carPosition.z,
-                angle: carPosition.angle
-            };
-            
-            const gx = 130; const gy = 80; const gw = 420; const gh = 340;
-
-            ctx.fillStyle = '#111';
-            ctx.fillRect(gx+80, gy+gh, 180, 20);
-            ctx.beginPath(); ctx.moveTo(gx+100, gy+gh); ctx.lineTo(gx+100, gy+gh-20); ctx.lineTo(gx+240, gy+gh-20); ctx.lineTo(gx+240, gy+gh); ctx.fill();
-
-            ctx.fillStyle = '#181818';
-            drawRect(gx, gy, gw, gh, '#181818');
-            ctx.strokeStyle = '#444';
-            ctx.lineWidth = 1;
-            ctx.strokeRect(gx, gy, gw, gh);
-            
-            ctx.fillStyle = '#333';
-            for(let i=0; i<4; i++) { ctx.fillRect(gx + gw - 20, gy + 30 + (i*50), 10, 30); }
-
-            const sx = gx + 15; const sy = gy + 15; const sw = gw - 40; const sh = gh - 30;
-
-            ctx.save();
-            ctx.beginPath(); ctx.rect(sx, sy, sw, sh); ctx.clip();
-
-            ctx.fillStyle = palette.screenBg;
-            ctx.fillRect(sx, sy, sw, sh);
-            
-            ctx.strokeStyle = '#003300';
-            ctx.lineWidth = 1;
-            for(let i=0; i<sw; i+=40) { ctx.beginPath(); ctx.moveTo(sx+i, sy); ctx.lineTo(sx+i, sy+sh); ctx.stroke(); }
-            for(let i=0; i<sh; i+=40) { ctx.beginPath(); ctx.moveTo(sx, sy+i); ctx.lineTo(sx+sw, sy+i); ctx.stroke(); }
-
-            const viewCX = sx + sw/2;
-            const viewCY = sy + sh * 0.75;
-            
-            // Use actual car position directly
-            const carP = {
-                x: currentCarPos.x,
-                y: currentCarPos.z
-            };
-            
-            // Use actual car angle for heading
-            let heading: number;
-            if (currentCarPos.angle !== undefined && !isNaN(currentCarPos.angle)) {
-                // Use actual car angle (convert from game angle to map angle)
-                heading = currentCarPos.angle + Math.PI/2;
-            } else {
-                // Fallback: use direction from pathHistory if available
-                if (pathHistory.length >= 2) {
-                    const last = pathHistory[pathHistory.length - 1];
-                    const prev = pathHistory[pathHistory.length - 2];
-                    heading = Math.atan2(last.z - prev.z, last.x - prev.x) + Math.PI/2;
-                } else {
-                    heading = 0;
-                }
-            }
-
-            // Center the view on the car and rotate to match car heading
-            ctx.translate(viewCX, viewCY);
-            ctx.rotate(-heading);
-            // Translate to center car at origin (0,0) in rotated space
-            ctx.translate(-carP.x, -carP.y);
-
-            // Draw the actual game track (oval circuit) around car position
-            const centerX = 100;
-            const centerZ = 100;
-            const radiusX = 80;
-            const radiusZ = 60;
-            const roadWidth = 15;
-            
-            // Draw outer wall (red)
-            ctx.strokeStyle = palette.screenWall;
-            ctx.lineWidth = 4;
-            ctx.beginPath();
-            for (let angle = 0; angle <= Math.PI * 2; angle += 0.1) {
-                const x = centerX + (radiusX + roadWidth) * Math.cos(angle);
-                const y = centerZ + (radiusZ + roadWidth) * Math.sin(angle);
-                if (angle === 0) {
-                    ctx.moveTo(x, y);
-                } else {
-                    ctx.lineTo(x, y);
-                }
-            }
-            ctx.closePath();
-            ctx.stroke();
-            
-            // Draw inner wall (green/yellow)
-            ctx.strokeStyle = palette.screenLine;
-            ctx.lineWidth = 4;
-            ctx.beginPath();
-            for (let angle = 0; angle <= Math.PI * 2; angle += 0.1) {
-                const x = centerX + (radiusX - roadWidth) * Math.cos(angle);
-                const y = centerZ + (radiusZ - roadWidth) * Math.sin(angle);
-                if (angle === 0) {
-                    ctx.moveTo(x, y);
-                } else {
-                    ctx.lineTo(x, y);
-                }
-            }
-            ctx.closePath();
-            ctx.stroke();
-            
-            // Draw center line (dashed)
-            ctx.strokeStyle = '#335533';
-            ctx.lineWidth = 2;
-            ctx.setLineDash([10, 10]);
-            ctx.beginPath();
-            for (let angle = 0; angle <= Math.PI * 2; angle += 0.1) {
-                const x = centerX + radiusX * Math.cos(angle);
-                const y = centerZ + radiusZ * Math.sin(angle);
-                if (angle === 0) {
-                    ctx.moveTo(x, y);
-                } else {
-                    ctx.lineTo(x, y);
-                }
-            }
-            ctx.closePath();
-            ctx.stroke();
-            ctx.setLineDash([]);
-            
-            // Draw path history (where car has been)
-            if (pathHistory.length >= 2) {
-                ctx.strokeStyle = '#00ff4444';
-                ctx.lineWidth = 3;
-                ctx.beginPath();
-                ctx.moveTo(pathHistory[0].x, pathHistory[0].z);
-                for (let i = 1; i < pathHistory.length; i++) {
-                    ctx.lineTo(pathHistory[i].x, pathHistory[i].z);
-                }
-                ctx.stroke();
-            }
-            
-            // Draw traps from game state
-            if (traps && traps.length > 0) {
-                ctx.fillStyle = '#ff0000';
-                traps.forEach(trap => {
-                    const dist = Math.sqrt(Math.pow(trap.x - carP.x, 2) + Math.pow(trap.z - carP.y, 2));
-                    if (dist < 200) { // Only draw nearby traps
-                        ctx.beginPath();
-                        ctx.arc(trap.x, trap.z, trap.radius || 3, 0, Math.PI * 2);
-                        ctx.fill();
-                    }
-                });
-            }
-            
-            // Draw car position indicator (white triangle)
-            ctx.fillStyle = '#fff';
-            ctx.beginPath();
-            ctx.moveTo(carP.x, carP.y - 8);
-            ctx.lineTo(carP.x - 6, carP.y + 6);
-            ctx.lineTo(carP.x + 6, carP.y + 6);
-            ctx.closePath();
-            ctx.fill();
-            
-            ctx.restore();
-
-            ctx.fillStyle = '#fff';
-            ctx.beginPath(); ctx.moveTo(viewCX, viewCY - 8); ctx.lineTo(viewCX - 6, viewCY + 6); ctx.lineTo(viewCX + 6, viewCY + 6); ctx.fill();
-
-            ctx.fillStyle = 'rgba(0,0,0,0.8)';
-            ctx.fillRect(sx, sy, sw, 25);
-            ctx.fillStyle = palette.screenText;
-            ctx.font = '10px monospace';
-            const distToFinish = Math.sqrt(
-                Math.pow(endPoint.x - carPosition.x, 2) + 
-                Math.pow(endPoint.z - carPosition.z, 2)
-            );
-            ctx.fillText("DIST: " + Math.floor(distToFinish).toFixed(0) + "m", sx + 5, sy + 15);
-            // Display speed in km/h (speed is 0-100, convert to 0-1000 km/h for display)
-            const speedKmh = Math.floor(speed * 10);
-            ctx.fillText("SPD: " + speedKmh, sx + sw - 50, sy + 15);
-
-            // Calculate upcoming curve based on pathHistory direction changes
-            let upcomingCurve = 0;
-            if (pathHistory.length >= 3) {
-                // Use recent path history to determine curve
-                const recent = pathHistory.slice(-10);
-                for (let i = 1; i < recent.length - 1; i++) {
-                    const prev = recent[i - 1];
-                    const curr = recent[i];
-                    const next = recent[i + 1];
-                    const angle1 = Math.atan2(curr.z - prev.z, curr.x - prev.x);
-                    const angle2 = Math.atan2(next.z - curr.z, next.x - curr.x);
-                    let angleDiff = angle2 - angle1;
-                    // Normalize angle difference to -PI to PI
-                    while (angleDiff > Math.PI) angleDiff -= 2 * Math.PI;
-                    while (angleDiff < -Math.PI) angleDiff += 2 * Math.PI;
-                    upcomingCurve += angleDiff;
-                }
-                upcomingCurve /= (recent.length - 2);
-            }
-
-            ctx.font = 'bold 20px monospace';
-            ctx.textAlign = 'center';
-            if(upcomingCurve > 0.4) {
-                ctx.fillStyle = palette.screenWall; ctx.fillText(">> R4", viewCX, sy + sh - 20);
-            } else if(upcomingCurve < -0.4) {
-                ctx.fillStyle = palette.screenWall; ctx.fillText("L4 <<", viewCX, sy + sh - 20);
-            } else {
-                ctx.fillStyle = '#558855'; ctx.font = '14px monospace'; ctx.fillText("POS CHECK", viewCX, sy + sh - 20);
-            }
-            ctx.textAlign = 'left';
-
-            ctx.fillStyle = '#0f0';
-            ctx.fillRect(sx + 5, sy + sh - 5, 4, 4);
-        };
-
-        const drawPeripheralDriver = () => {
-            ctx.fillStyle = '#223344';
-            ctx.beginPath(); ctx.moveTo(0, 480); ctx.lineTo(0, 200); ctx.quadraticCurveTo(50, 220, 80, 400); ctx.lineTo(40, 480); ctx.fill();
-            ctx.strokeStyle = '#fff';
-            ctx.lineWidth = 1;
-            ctx.setLineDash([4,4]);
-            ctx.beginPath(); ctx.moveTo(20, 250); ctx.lineTo(50, 400); ctx.stroke();
-            ctx.setLineDash([]);
-        };
-
-        const loop = (currentTime: number) => {
-            const deltaTime = currentTime - lastTime;
-            lastTime = currentTime;
-            
-            timeRef.current += 0.05;
-            // Don't update carPosIndex here - it's updated by useEffect based on actual car position
-            // This ensures the GPS map follows the real car movement, not a simulated one
-            if(carPosIndex.current >= trackPoints.current.length - 10) carPosIndex.current = 0;
-
-            ctx.clearRect(0, 0, 640, 480);
-            
-            drawBackground();
-            drawPeripheralDriver();
-            drawDashboard();
-            drawCenterConsole();
-            drawGPS();
-            
-            if(localState.hornPressed) {
-                ctx.fillStyle = 'rgba(255, 0, 0, 0.1)';
-                ctx.fillRect(0,0,640,480);
-            }
-
-            animationFrame = requestAnimationFrame(loop);
-        };
-
-        animationFrame = requestAnimationFrame(loop);
-
+        
+        canvas.width = VIEW_WIDTH;
+        canvas.height = VIEW_HEIGHT;
+        
+        requestRef.current = requestAnimationFrame(tick);
         return () => {
-            cancelAnimationFrame(animationFrame);
+            if (requestRef.current) {
+                cancelAnimationFrame(requestRef.current);
+            }
         };
-    }, [carPosition, speed, localState, endPoint, pathHistory, traps]);
+    }, [tick]);
 
     return (
-        <div style={{ 
-            margin: 0, 
-            backgroundColor: '#050505', 
-            display: 'flex', 
-            justifyContent: 'center', 
-            alignItems: 'center', 
-            height: '100vh', 
-            overflow: 'hidden',
+        <div style={{
+            margin: 0,
+            backgroundColor: '#000',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            minHeight: '100vh',
             fontFamily: "'Courier New', Courier, monospace",
-            userSelect: 'none',
-            WebkitUserSelect: 'none'
+            color: '#ccc',
+            padding: '16px'
         }}>
             <div style={{
                 position: 'relative',
-                boxShadow: '0 0 60px rgba(0,0,0,1)',
-                border: '2px solid #333',
-                background: '#000',
+                border: '8px solid #333',
+                borderRadius: '8px',
+                boxShadow: '0 0 30px rgba(0,0,0,0.9)',
+                backgroundColor: '#000',
+                overflow: 'hidden',
                 cursor: 'crosshair'
             }}>
                 <canvas 
-                    ref={canvasRef}
+                    ref={canvasRef} 
+                    width={VIEW_WIDTH} 
+                    height={VIEW_HEIGHT}
                     style={{
                         display: 'block',
-                        imageRendering: 'pixelated',
-                        imageRendering: 'crisp-edges',
-                        width: '960px',
-                        height: '720px'
+                        imageRendering: 'pixelated' as any
                     }}
+                    onMouseDown={handleMouseDown}
+                    onMouseUp={handleMouseUp}
                 />
                 <div style={{
                     position: 'absolute',
-                    top: 0,
-                    left: 0,
-                    width: '100%',
-                    height: '100%',
-                    background: 'linear-gradient(to bottom, rgba(0,0,0,0) 50%, rgba(0,0,0,0.25) 50%)',
-                    backgroundSize: '100% 4px',
+                    inset: 0,
                     pointerEvents: 'none',
-                    zIndex: 10
-                }} />
-                <div style={{
-                    position: 'absolute',
-                    top: 0,
-                    left: 0,
-                    width: '100%',
-                    height: '100%',
-                    background: 'radial-gradient(circle at 50% 30%, rgba(200,100,50,0.1) 0%, rgba(0,0,0,0.6) 90%)',
-                    pointerEvents: 'none',
-                    zIndex: 11
-                }} />
-                <div 
-                    ref={statusTextRef}
-                    style={{
-                        position: 'absolute',
-                        bottom: 20,
-                        right: 20,
-                        color: '#444',
-                        fontSize: '10px',
-                        textTransform: 'uppercase',
-                        letterSpacing: '2px',
-                        pointerEvents: 'none',
-                        zIndex: 12
-                    }}
-                >
-                    System: ONLINE
-                </div>
+                    backgroundImage: `linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06))`,
+                    backgroundSize: "100% 4px, 6px 100%"
+                }}></div>
+            </div>
+            
+            <div style={{
+                marginTop: '16px',
+                fontSize: '12px',
+                textTransform: 'uppercase',
+                letterSpacing: '2px',
+                color: '#666',
+                textAlign: 'center'
+            }}>
+                <div>Click en <span style={{color: '#fff', fontWeight: 'bold'}}>RADIO</span> para cambiar estaciรณn</div>
+                <div>Click en <span style={{color: '#fff', fontWeight: 'bold'}}>BGM</span> para activar/desactivar mรณsica</div>
+                <div>Click en <span style={{color: '#fff', fontWeight: 'bold'}}>HORN</span> para alertar</div>
             </div>
         </div>
     );

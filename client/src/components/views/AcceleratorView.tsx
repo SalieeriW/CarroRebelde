@@ -150,8 +150,7 @@ export const AcceleratorView = ({ speed, onAccelerate, turboActive, carPosition,
                     ref={canvasRef} 
                     className="accelerator-canvas"
                     style={{ 
-                        imageRendering: 'pixelated',
-                        imageRendering: 'crisp-edges'
+                        imageRendering: 'pixelated'
                     }}
                 ></canvas>
             </div>

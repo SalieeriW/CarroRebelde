@@ -9,11 +9,13 @@ const SAFE_WORDS = [
 ];
 
 export class GameRoom extends Room<GameState> {
-    maxClients = 2;
+    maxClients = 10; // 2 players + up to 8 spectators (monitors)
     private challengeTimer: NodeJS.Timeout | null = null;
     private challengeInterval: NodeJS.Timeout | null = null;
     private trapEffects: Map<string, NodeJS.Timeout> = new Map();
     public roomCode: string = "";
+    private trackPoints: Array<{ x: number; z: number }> = [];
+    private readonly TRACK_WIDTH = 240; // keep in sync with client track rendering
 
     onCreate(options: any) {
         try {
@@ -23,18 +25,21 @@ export class GameRoom extends Room<GameState> {
             this.roomCode = this.generateRoomCode();
             this.state.roomCode = this.roomCode;
             
-            // Set start point (A)
-            this.state.startX = 0;
-            this.state.startZ = 0;
-            this.state.car.x = 0;
-            this.state.car.z = 0;
-            
-            // Set end point (B) - destination
-            this.state.endX = 200;
-            this.state.endZ = 200;
-            
-            // Generate road path with walls
-            this.generateRoadPath();
+            // Generate the authoritative procedural circuit on the server.
+            // Driver + Navigator share the same circuit AND the car drives on it.
+            this.trackPoints = this.generateProceduralTrackPoints();
+            this.state.trackData = JSON.stringify(this.trackPoints.map(p => ({ x: p.x, y: p.z })));
+
+            // Spawn car at track start
+            const start = this.trackPoints[0] || { x: 0, z: 0 };
+            const next = this.trackPoints[1] || { x: start.x + 1, z: start.z };
+            this.state.startX = start.x;
+            this.state.startZ = start.z;
+            this.state.endX = start.x;
+            this.state.endZ = start.z;
+            this.state.car.x = start.x;
+            this.state.car.z = start.z;
+            this.state.car.angle = Math.atan2(next.x - start.x, next.z - start.z);
             
             // Store room info globally
             if ((global as any).activeRooms) {
@@ -46,6 +51,12 @@ export class GameRoom extends Room<GameState> {
             }
             
             console.log("Room created with code:", this.roomCode);
+            
+            // Register room by code for minigame callbacks
+            const roomsByCode = (global as any).roomsByCode;
+            if (roomsByCode) {
+                roomsByCode.set(this.roomCode, this);
+            }
 
             // Game Loop (50ms = 20fps)
             this.setSimulationInterval((deltaTime) => this.update(deltaTime), 50);
@@ -82,6 +93,12 @@ export class GameRoom extends Room<GameState> {
                     this.state.car.accelerating = data.accelerate;
                     console.log("ACCELERATING CHANGED:", oldValue, "->", data.accelerate, "Speed:", this.state.car.speed.toFixed(2));
                 }
+                // Handle collision with cone - set speed to 0
+                if (data.type === "collision") {
+                    this.state.car.speed = 0;
+                    this.state.car.accelerating = false;
+                    console.log("COLLISION: Speed reset to 0");
+                }
             } else {
                 console.log("NOT DRIVER, role is:", player.role);
             }
@@ -99,6 +116,93 @@ export class GameRoom extends Room<GameState> {
             const player = this.state.players.get(client.sessionId);
             if (player && player.role === "navigator") {
                 this.state.radioStation = data.station || "normal";
+            }
+        });
+
+        this.onMessage("bgm_toggle", (client, data) => {
+            const player = this.state.players.get(client.sessionId);
+            if (player && player.role === "navigator") {
+                this.state.bgmEnabled = data.enabled !== undefined ? data.enabled : !this.state.bgmEnabled;
+            }
+        });
+
+        // Track circuit data from driver
+        this.onMessage("track", (client, data) => {
+            const player = this.state.players.get(client.sessionId);
+            // Allow the driver to regenerate the circuit; keep server authoritative afterwards.
+            if (player && player.role === "driver" && data.trackData) {
+                try {
+                    const parsed = JSON.parse(data.trackData);
+                    if (Array.isArray(parsed) && parsed.length > 2) {
+                        this.trackPoints = parsed
+                            .filter((p: any) => typeof p?.x === "number" && typeof p?.y === "number")
+                            .map((p: any) => ({ x: p.x, z: p.y }));
+
+                        if (this.trackPoints.length > 2) {
+                            this.state.trackData = data.trackData;
+
+                            const start = this.trackPoints[0] || { x: 0, z: 0 };
+                            const next = this.trackPoints[1] || { x: start.x + 1, z: start.z };
+                            this.state.startX = start.x;
+                            this.state.startZ = start.z;
+                            this.state.endX = start.x;
+                            this.state.endZ = start.z;
+                            this.state.car.x = start.x;
+                            this.state.car.z = start.z;
+                            this.state.car.speed = 0;
+                            this.state.car.accelerating = false;
+                            this.state.car.angle = Math.atan2(next.x - start.x, next.z - start.z);
+                        }
+
+                        console.log("Track circuit received from driver, points:", this.trackPoints.length);
+                    }
+                } catch (e) {
+                    console.warn("Invalid trackData from driver:", e);
+                }
+            }
+        });
+
+        // Cones/obstacles data from driver - these are the obstacles for NavigatorView
+        this.onMessage("cones", (client, data) => {
+            const player = this.state.players.get(client.sessionId);
+            // Only accept cones from the driver
+            if (player && player.role === "driver" && data.conesData) {
+                try {
+                    const parsed = JSON.parse(data.conesData);
+                    if (Array.isArray(parsed)) {
+                        // Store the cones data for NavigatorView to use
+                        // Note: cones use {x, y} where y = z in server terms
+                        this.state.conesData = data.conesData;
+                        console.log("Cones received from driver:", parsed.length);
+                    }
+                } catch (e) {
+                    console.warn("Invalid conesData from driver:", e);
+                }
+            }
+        });
+
+        // Cone collision - trigger minigame for ALL players
+        this.onMessage("cone_hit", (client, data) => {
+            const player = this.state.players.get(client.sessionId);
+            if (player && player.role === "driver" && !this.state.minigameActive) {
+                // Start minigame
+                const sessionId = `mg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+                this.state.minigameActive = true;
+                this.state.minigameSessionId = sessionId;
+                this.state.minigameResult = "pending";
+                
+                // Stop the car
+                this.state.car.speed = 0;
+                
+                console.log(`🎮 Minigame triggered for ALL players! Session: ${sessionId}`);
+                
+                // DUMMY: Auto-resolve after 3 seconds - ALWAYS WIN for testing
+                setTimeout(() => {
+                    if (this.state.minigameActive && this.state.minigameSessionId === sessionId) {
+                        console.log("🎮 Auto-resolving minigame...");
+                        this.resolveMinigame(true); // Always win for testing
+                    }
+                }, 3000);
             }
         });
 
@@ -168,6 +272,22 @@ export class GameRoom extends Room<GameState> {
         const car = this.state.car;
         const deltaSeconds = deltaTime / 1000;
 
+        // FREEZE car during minigame - no physics, no movement
+        if (this.state.minigameActive) {
+            car.speed = 0;
+            car.steeringValue = 0;
+            // Still update reward timers
+            if (car.clarityTimeLeft > 0) {
+                car.clarityTimeLeft -= deltaTime;
+                if (car.clarityTimeLeft <= 0) car.clarityActive = false;
+            }
+            if (car.speedBoostTimeLeft > 0) {
+                car.speedBoostTimeLeft -= deltaTime;
+                if (car.speedBoostTimeLeft <= 0) car.speedBoostActive = false;
+            }
+            return; // Skip all physics
+        }
+
         // Update timers
         if (car.turboTimeLeft > 0) {
             car.turboTimeLeft -= deltaTime;
@@ -190,62 +310,164 @@ export class GameRoom extends Room<GameState> {
             }
         }
 
-        // Acceleration (apply continuously if accelerating)
-        // MUST be frame-rate independent - scale by deltaTime
-        // Higher acceleration rate to reach max speed quickly
-        const accelRate = 8 * deltaSeconds; // 8 units per second
+        // Clarity timer (reward from minigame)
+        if (car.clarityTimeLeft > 0) {
+            car.clarityTimeLeft -= deltaTime;
+            if (car.clarityTimeLeft <= 0) {
+                car.clarityActive = false;
+            }
+        }
+
+        // Speed boost timer (reward from minigame)
+        if (car.speedBoostTimeLeft > 0) {
+            car.speedBoostTimeLeft -= deltaTime;
+            if (car.speedBoostTimeLeft <= 0) {
+                car.speedBoostActive = false;
+            }
+        }
+
+        // === ARCADE RACING PHYSICS ===
+        
+        // Acceleration - snappy and responsive
+        const maxSpeed = 100;
+        const accelRate = 150 * deltaSeconds; // Fast acceleration
+        const brakeRate = 100 * deltaSeconds; // Strong brakes
+        const friction = 30 * deltaSeconds; // Natural slowdown
+        
         if (car.accelerating) {
-            // Direct speed increase - scaled by deltaTime for frame-rate independence
             car.speed += accelRate;
             if (car.turboActive) {
-                car.speed += accelRate * 0.5; // Extra boost with turbo
+                car.speed += accelRate * 0.5;
+            }
+            // Speed boost from minigame win (+20%)
+            if (car.speedBoostActive) {
+                car.speed += accelRate * 0.2;
             }
         } else {
-            // Apply friction/deceleration when not accelerating
-            // Hybrid approach: constant deceleration + small proportional component
-            // This ensures deceleration works at low speeds but isn't too aggressive at high speeds
-            const constantFriction = 3.0 * deltaSeconds; // Base constant deceleration (works at all speeds)
-            const proportionalFriction = car.speed * 0.02 * deltaSeconds; // Small proportional component (2% per second)
-            const totalFriction = constantFriction + proportionalFriction;
-            car.speed = Math.max(0, car.speed - totalFriction);
-            // Stop completely if speed is very low
-            if (car.speed < 0.1) car.speed = 0;
+            // Coast to a stop
+            car.speed = Math.max(0, car.speed - friction);
         }
         
-        // ALWAYS cap max speed at 100 - CRITICAL: Apply this EVERY frame
-        // Use Math.min to ensure it never exceeds 100
-        car.speed = Math.min(car.speed, 100);
-        
-        // Also enforce minimum speed
-        car.speed = Math.max(car.speed, 0.1);
+        // Speed limits (higher if speed boost active)
+        const effectiveMaxSpeed = car.speedBoostActive ? maxSpeed * 1.2 : maxSpeed;
+        car.speed = Math.min(car.speed, effectiveMaxSpeed);
+        if (car.speed < 1) car.speed = 0;
 
-        // Steering - apply steering value to angle
-        const steeringSpeed = 0.08 * (car.speed > 0.1 ? 1 : 0);
-        car.angle += car.steeringValue * steeringSpeed;
+        // Steering - INVERTED (negative because of coordinate system)
+        // More responsive at low speed, tighter at high speed
+        if (car.speed > 0.5) {
+            const baseSteerRate = 3.5; // Radians per second
+            const speedRatio = car.speed / maxSpeed;
+            // At low speed: turn faster. At high speed: turn slower
+            const steerMultiplier = 1.5 - speedRatio * 0.8;
+            // NEGATIVE to fix inversion
+            const steerAmount = -car.steeringValue * baseSteerRate * deltaSeconds * steerMultiplier;
+            car.angle += steerAmount;
+        }
 
-        // Movement
-        const oldX = car.x;
-        const oldZ = car.z;
-        
-        // Movement - frame-rate independent (scale by deltaSeconds)
-        car.x += Math.sin(car.angle) * car.speed * deltaSeconds;
-        car.z += Math.cos(car.angle) * car.speed * deltaSeconds;
+        // Movement - direct and responsive
+        const moveMultiplier = 4.0; // Makes car feel fast
+        const velocity = car.speed * deltaSeconds * moveMultiplier;
+        car.x += Math.sin(car.angle) * velocity;
+        car.z += Math.cos(car.angle) * velocity;
 
-        // Check if car crashed (off road) - enforce wall boundaries strictly
+        // Check if car crashed (off road) - push back to road gently
         if (!this.isOnRoad(car.x, car.z)) {
-            // Respawn at nearest road point immediately
             const respawnPoint = this.getNearestRoadPoint(car.x, car.z);
-            car.x = respawnPoint.x;
-            car.z = respawnPoint.z;
-            // Reduce speed more significantly when hitting walls
-            car.speed *= 0.85; // Reduce by 15% when hitting walls
-            // Re-apply speed cap after crash
-            car.speed = Math.min(car.speed, 100);
+            // Smoothly push car back to road instead of teleporting
+            const pushStrength = 0.3;
+            car.x = car.x + (respawnPoint.x - car.x) * pushStrength;
+            car.z = car.z + (respawnPoint.z - car.z) * pushStrength;
+            // Small speed penalty
+            car.speed *= 0.95;
         }
         
-        // FINAL speed cap check - ALWAYS enforce at the end of update
+        // Cap speed (no minimum - allow complete stop)
         car.speed = Math.min(car.speed, 100);
-        car.speed = Math.max(car.speed, 0.1);
+        if (car.speed < 0.5) car.speed = 0;
+
+        // === LAP TRACKING ===
+        if (this.state.gamePhase === "playing" && !this.state.raceFinished && this.trackPoints.length > 10) {
+            // Update race time
+            this.state.raceTime += deltaTime;
+            
+            // Calculate progress around track (0 to 1)
+            const progress = this.getTrackProgress(car.x, car.z);
+            const oldProgress = this.state.raceProgress;
+            
+            const totalSegments = this.trackPoints.length;
+            const currentSegment = Math.floor(progress * totalSegments);
+            
+            // === INVISIBLE BARRIER AT START ===
+            // If player hasn't passed checkpoint 25% yet and tries to go backwards (progress > 0.9)
+            // Push them back to the start
+            const checkpoint25 = Math.floor(totalSegments * 0.25);
+            const tryingToGoBackwardsAtStart = this.state.lastCheckpoint < checkpoint25 && progress > 0.85;
+            
+            if (tryingToGoBackwardsAtStart) {
+                // Push car back to start position
+                const startPoint = this.trackPoints[5]; // A bit ahead of start
+                const nextPoint = this.trackPoints[6];
+                if (startPoint && nextPoint) {
+                    car.x = startPoint.x;
+                    car.z = startPoint.z;
+                    car.angle = Math.atan2(nextPoint.x - startPoint.x, nextPoint.z - startPoint.z);
+                    car.speed = 0;
+                    console.log("🚧 BARRIER: Player tried to go backwards at start!");
+                }
+                return; // Skip rest of lap tracking
+            }
+            
+            this.state.raceProgress = progress;
+            
+            // ANTI-CHEAT: Must pass mandatory checkpoints in order
+            // Checkpoint 1: 25% of track
+            // Checkpoint 2: 50% of track  
+            // Checkpoint 3: 75% of track
+            // Only then can you cross the finish line
+            
+            const checkpoint50 = Math.floor(totalSegments * 0.50);
+            const checkpoint75 = Math.floor(totalSegments * 0.75);
+            
+            // Update checkpoint only if moving FORWARD (progress increasing, not wrapping)
+            const isMovingForward = (progress > oldProgress && progress - oldProgress < 0.5) ||
+                                    (oldProgress > 0.9 && progress < 0.1); // Wrapping around finish
+            
+            if (isMovingForward) {
+                // Track highest checkpoint reached
+                if (currentSegment >= checkpoint25 && this.state.lastCheckpoint < checkpoint25) {
+                    this.state.lastCheckpoint = checkpoint25;
+                    console.log("Checkpoint 25% passed!");
+                }
+                if (currentSegment >= checkpoint50 && this.state.lastCheckpoint < checkpoint50) {
+                    this.state.lastCheckpoint = checkpoint50;
+                    console.log("Checkpoint 50% passed!");
+                }
+                if (currentSegment >= checkpoint75 && this.state.lastCheckpoint < checkpoint75) {
+                    this.state.lastCheckpoint = checkpoint75;
+                    console.log("Checkpoint 75% passed!");
+                }
+            }
+            
+            // Detect lap completion (crossing from ~0.95 to ~0.05)
+            // MUST have passed all 3 checkpoints (75% checkpoint = all checkpoints passed)
+            const crossedFinishLine = oldProgress > 0.9 && progress < 0.1;
+            const hasPassedAllCheckpoints = this.state.lastCheckpoint >= checkpoint75;
+            
+            if (crossedFinishLine && hasPassedAllCheckpoints) {
+                this.state.currentLap++;
+                this.state.lastCheckpoint = 0; // Reset checkpoints for next lap
+                
+                console.log(`LAP ${this.state.currentLap} COMPLETED! Time: ${(this.state.raceTime / 1000).toFixed(2)}s`);
+                
+                // Check for win
+                if (this.state.currentLap >= this.state.totalLaps) {
+                    this.state.raceFinished = true;
+                    this.state.gamePhase = "finished";
+                    console.log("RACE FINISHED! Winner!");
+                }
+            }
+        }
 
         // Challenge portal collision
         if (this.state.challengePortalActive && this.state.gamePhase === "playing") {
@@ -294,10 +516,9 @@ export class GameRoom extends Room<GameState> {
             }
         });
         
-        // FINAL speed cap check - ALWAYS enforce at the very end of update
-        // This ensures speed never exceeds 100, no matter what happened during the frame
+        // Final speed cap
         car.speed = Math.min(car.speed, 100);
-        car.speed = Math.max(car.speed, 0.1);
+        if (car.speed < 0.5) car.speed = 0;
     }
 
     applyTrapEffect(type: string) {
@@ -450,24 +671,46 @@ export class GameRoom extends Room<GameState> {
             const player = new Player();
             player.sessionId = client.sessionId;
 
-            // Role assignment (only 2 roles: driver and navigator)
-            const roles = ["driver", "navigator"];
-            const assignedRoles = Array.from(this.state.players.values()).map(p => p.role);
-            const availableRole = roles.find(r => !assignedRoles.includes(r)) || "spectator";
+            // Check if joining as explicit spectator (monitor)
+            if (options?.role === 'spectator') {
+                player.role = 'spectator';
+                console.log("Monitor joined as spectator:", client.sessionId);
+            } else {
+                // Role assignment (only 2 roles: driver and navigator)
+                const roles = ["driver", "navigator"];
+                const assignedRoles = Array.from(this.state.players.values())
+                    .filter(p => p.role !== 'spectator')
+                    .map(p => p.role);
+                const availableRole = roles.find(r => !assignedRoles.includes(r)) || "spectator";
+                player.role = availableRole;
+            }
 
-            player.role = availableRole;
             this.state.players.set(client.sessionId, player);
             
-            // Update room info
+            // Update room info (only count non-spectator players)
             if ((global as any).activeRooms) {
                 const roomInfo = (global as any).activeRooms.get(this.roomId);
                 if (roomInfo) {
-                    roomInfo.players = this.state.players.size;
+                    const activePlayers = Array.from(this.state.players.values())
+                        .filter(p => p.role !== 'spectator').length;
+                    roomInfo.players = activePlayers;
                     (global as any).activeRooms.set(this.roomId, roomInfo);
                 }
             }
             
-            console.log("Assigned role:", availableRole, "to", client.sessionId);
+            console.log("Assigned role:", player.role, "to", client.sessionId);
+            
+            // Auto-start game when both driver and navigator have joined
+            const activePlayers = Array.from(this.state.players.values())
+                .filter(p => p.role !== 'spectator');
+            const hasDriver = activePlayers.some(p => p.role === 'driver');
+            const hasNavigator = activePlayers.some(p => p.role === 'navigator');
+            
+            if (hasDriver && hasNavigator && this.state.gamePhase === 'lobby') {
+                console.log("🚀 Auto-starting game - both players ready!");
+                this.state.gamePhase = 'playing';
+                this.spawnChallengePortal();
+            }
         } catch (error) {
             console.error("Error in onJoin:", error);
             throw error;
@@ -478,11 +721,13 @@ export class GameRoom extends Room<GameState> {
         console.log(client.sessionId, "left!");
         this.state.players.delete(client.sessionId);
         
-        // Update room info
+        // Update room info (only count non-spectator players)
         if ((global as any).activeRooms) {
             const roomInfo = (global as any).activeRooms.get(this.roomId);
             if (roomInfo) {
-                roomInfo.players = this.state.players.size;
+                const activePlayers = Array.from(this.state.players.values())
+                    .filter(p => p.role !== 'spectator').length;
+                roomInfo.players = activePlayers;
                 (global as any).activeRooms.set(this.roomId, roomInfo);
             }
         }
@@ -513,76 +758,195 @@ export class GameRoom extends Room<GameState> {
         return code;
     }
 
-    private generateRoadPath() {
-        // Create F1-style circuit with clear road
-        // Simple oval circuit for now
-        const centerX = 100;
-        const centerZ = 100;
-        const radiusX = 80;
-        const radiusZ = 60;
+    // Calculate progress around the track (0 to 1)
+    private getTrackProgress(x: number, z: number): number {
+        if (!this.trackPoints || this.trackPoints.length < 2) return 0;
         
-        // Start and end at same point (circuit)
-        this.state.startX = centerX;
-        this.state.startZ = centerZ - radiusZ;
-        this.state.endX = centerX;
-        this.state.endZ = centerZ - radiusZ;
-        
-        // Set car at start
-        this.state.car.x = this.state.startX;
-        this.state.car.z = this.state.startZ;
-        this.state.car.angle = 0;
-        
-        this.state.pathX = this.state.endX;
-        this.state.pathZ = this.state.endZ;
+        let minDistSq = Infinity;
+        let closestSegment = 0;
+        let closestT = 0;
+
+        for (let i = 0; i < this.trackPoints.length; i++) {
+            const p1 = this.trackPoints[i]!;
+            const p2 = this.trackPoints[(i + 1) % this.trackPoints.length]!;
+            const vx = p2.x - p1.x;
+            const vz = p2.z - p1.z;
+            const l2 = vx * vx + vz * vz;
+            if (l2 === 0) continue;
+
+            let t = ((x - p1.x) * vx + (z - p1.z) * vz) / l2;
+            t = Math.max(0, Math.min(1, t));
+            const projX = p1.x + t * vx;
+            const projZ = p1.z + t * vz;
+            const dx = x - projX;
+            const dz = z - projZ;
+            const distSq = dx * dx + dz * dz;
+            
+            if (distSq < minDistSq) {
+                minDistSq = distSq;
+                closestSegment = i;
+                closestT = t;
+            }
+        }
+
+        // Progress = (segment + t) / total segments
+        const progress = (closestSegment + closestT) / this.trackPoints.length;
+        return progress;
     }
 
-    // Check if car is on road (inside walls)
+    // Distance from a point to the procedural track polyline (closed loop)
+    private getTrackInfo(x: number, z: number): { dist: number; proj: { x: number; z: number } } {
+        if (!this.trackPoints || this.trackPoints.length < 2) {
+            return { dist: Infinity, proj: { x, z } };
+        }
+        let minDistSq = Infinity;
+        let closestProj = { x: this.trackPoints[0]!.x, z: this.trackPoints[0]!.z };
+
+        for (let i = 0; i < this.trackPoints.length; i++) {
+            const p1 = this.trackPoints[i]!;
+            const p2 = this.trackPoints[(i + 1) % this.trackPoints.length]!;
+            const vx = p2.x - p1.x;
+            const vz = p2.z - p1.z;
+            const l2 = vx * vx + vz * vz;
+            if (l2 === 0) continue;
+
+            let t = ((x - p1.x) * vx + (z - p1.z) * vz) / l2;
+            t = Math.max(0, Math.min(1, t));
+            const projX = p1.x + t * vx;
+            const projZ = p1.z + t * vz;
+            const dx = x - projX;
+            const dz = z - projZ;
+            const distSq = dx * dx + dz * dz;
+            if (distSq < minDistSq) {
+                minDistSq = distSq;
+                closestProj = { x: projX, z: projZ };
+            }
+        }
+
+        return { dist: Math.sqrt(minDistSq), proj: closestProj };
+    }
+
     private isOnRoad(x: number, z: number): boolean {
-        // Simple check: car should be within road boundaries
-        // For oval circuit: check if inside ellipse
-        const centerX = 100;
-        const centerZ = 100;
-        const radiusX = 80;
-        const radiusZ = 60;
-        const roadWidth = 15; // Road width (half on each side)
-        
-        // Calculate normalized distance from center for outer boundary
-        const outerDx = (x - centerX) / (radiusX + roadWidth);
-        const outerDz = (z - centerZ) / (radiusZ + roadWidth);
-        const outerDist = outerDx * outerDx + outerDz * outerDz;
-        
-        // Check if outside outer ellipse (crashed - too far out)
-        if (outerDist > 1) return false;
-        
-        // Calculate normalized distance from center for inner boundary
-        const innerDx = (x - centerX) / (radiusX - roadWidth);
-        const innerDz = (z - centerZ) / (radiusZ - roadWidth);
-        const innerDist = innerDx * innerDx + innerDz * innerDz;
-        
-        // Check if inside inner ellipse (crashed - too close to center)
-        if (innerDist < 1) return false;
-        
-        // Car is between inner and outer boundaries = on road
-        return true;
+        const { dist } = this.getTrackInfo(x, z);
+        return dist <= this.TRACK_WIDTH / 2;
     }
 
-    // Get nearest road point for respawn
-    private getNearestRoadPoint(x: number, z: number): { x: number, z: number } {
-        // Find nearest point on road circuit
-        const centerX = 100;
-        const centerZ = 100;
-        const radiusX = 80;
-        const radiusZ = 60;
+    private getNearestRoadPoint(x: number, z: number): { x: number; z: number } {
+        const { proj } = this.getTrackInfo(x, z);
+        return proj;
+    }
+
+    private generateProceduralTrackPoints(): Array<{ x: number; z: number }> {
+        const points: Array<{ x: number; z: number }> = [];
+        const numPoints = 300;
+        const baseRadius = 2500;
+
+        const layers: Array<{ frequency: number; phase: number; amplitude: number }> = [];
+        const numLayers = 6;
+
+        for (let i = 0; i < numLayers; i++) {
+            layers.push({
+                frequency: Math.floor(Math.random() * 10) + 2,
+                phase: Math.random() * Math.PI * 2,
+                amplitude: (Math.random() * 800 + 400) / (i + 1.5),
+            });
+        }
+
+        for (let i = 0; i < numPoints; i++) {
+            const angle = (i / numPoints) * Math.PI * 2;
+            let radiusOffset = 0;
+
+            for (const layer of layers) {
+                radiusOffset += Math.sin(angle * layer.frequency + layer.phase) * layer.amplitude;
+            }
+
+            const r = Math.max(800, baseRadius + radiusOffset);
+            points.push({
+                x: Math.cos(angle) * r,
+                z: Math.sin(angle) * r,
+            });
+        }
+        return points;
+    }
+
+
+    // Resolve minigame result (called by HTTP endpoint or dummy timer)
+    public resolveMinigame(won: boolean) {
+        console.log(`🎮 resolveMinigame called, won=${won}, minigameActive=${this.state.minigameActive}`);
         
-        // Calculate angle from center
-        const dx = x - centerX;
-        const dz = z - centerZ;
-        const angle = Math.atan2(dx, dz);
+        if (!this.state.minigameActive) {
+            console.log("❌ Minigame not active, skipping");
+            return;
+        }
         
-        // Project to road center
-        const roadX = centerX + Math.sin(angle) * radiusX;
-        const roadZ = centerZ + Math.cos(angle) * radiusZ;
+        this.state.minigameResult = won ? "won" : "lost";
         
-        return { x: roadX, z: roadZ };
+        if (won) {
+            // Apply rewards: 8 seconds clarity + 20% speed boost
+            this.state.car.clarityActive = true;
+            this.state.car.clarityTimeLeft = 8000; // 8 seconds
+            this.state.car.speedBoostActive = true;
+            this.state.car.speedBoostTimeLeft = 8000; // 8 seconds of speed boost
+            console.log(`🏆 Minigame WON! clarityActive=${this.state.car.clarityActive}, clarityTimeLeft=${this.state.car.clarityTimeLeft}`);
+        } else {
+            console.log(`❌ Minigame LOST!`);
+        }
+        
+        // Reposition car to center of track and freeze controls
+        this.repositionCarToTrackCenter();
+        
+        // Reset all car controls
+        this.state.car.steeringValue = 0;
+        this.state.car.accelerating = false;
+        this.state.car.speed = 0;
+        
+        // End minigame after 3 seconds cooldown
+        setTimeout(() => {
+            this.state.minigameActive = false;
+            this.state.minigameSessionId = "";
+            this.state.minigameResult = "";
+            // Reset controls again just to be safe
+            this.state.car.steeringValue = 0;
+            this.state.car.speed = 0;
+            console.log("🎮 Minigame ended, car repositioned, ready to continue!");
+        }, 3000);
+    }
+    
+    // Reposition car to the center of the nearest track segment
+    private repositionCarToTrackCenter() {
+        if (!this.trackPoints || this.trackPoints.length < 2) return;
+        
+        const car = this.state.car;
+        
+        // Find the nearest track point
+        let minDist = Infinity;
+        let nearestIdx = 0;
+        
+        for (let i = 0; i < this.trackPoints.length; i++) {
+            const p = this.trackPoints[i]!;
+            const dx = car.x - p.x;
+            const dz = car.z - p.z;
+            const dist = dx * dx + dz * dz;
+            if (dist < minDist) {
+                minDist = dist;
+                nearestIdx = i;
+            }
+        }
+        
+        // Get the track point and the next one to calculate direction
+        const currentPoint = this.trackPoints[nearestIdx]!;
+        const nextPoint = this.trackPoints[(nearestIdx + 1) % this.trackPoints.length]!;
+        
+        // Position car at track center
+        car.x = currentPoint.x;
+        car.z = currentPoint.z;
+        
+        // Point car in the direction of the track
+        car.angle = Math.atan2(nextPoint.x - currentPoint.x, nextPoint.z - currentPoint.z);
+        
+        // Reset speed
+        car.speed = 0;
+        
+        console.log(`🚗 Car repositioned to track center at (${car.x.toFixed(0)}, ${car.z.toFixed(0)}), angle=${car.angle.toFixed(2)}`);
     }
 }

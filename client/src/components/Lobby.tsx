@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react';
-import * as Colyseus from "colyseus.js";
 
 interface Room {
     roomId: string;
@@ -9,12 +8,11 @@ interface Room {
 }
 
 interface LobbyProps {
-    client: Colyseus.Client;
     onJoinRoom: (roomId: string) => void;
     onCreateRoom: () => void;
 }
 
-export const Lobby = ({ client, onJoinRoom, onCreateRoom }: LobbyProps) => {
+export const Lobby = ({ onJoinRoom, onCreateRoom }: LobbyProps) => {
     const [rooms, setRooms] = useState<Room[]>([]);
     const [roomCode, setRoomCode] = useState("");
     const [loading, setLoading] = useState(false);

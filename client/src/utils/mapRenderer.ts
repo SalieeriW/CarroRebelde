@@ -8,7 +8,7 @@ export function drawCircuitMap(
     challengePortal: { x: number; z: number; active: boolean },
     pathHistory: Array<{ x: number; z: number }>,
     startPoint: { x: number; z: number },
-    endPoint: { x: number; z: number },
+    _endPoint: { x: number; z: number },
     viewBounds?: { minX: number; maxX: number; minZ: number; maxZ: number } // Optional: limit view area
 ) {
     // Circuit parameters

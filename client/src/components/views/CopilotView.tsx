@@ -112,7 +112,6 @@ export const CopilotView = ({ onHorn, onRadio, radioStation, hornActive }: Copil
                     className="copilot-interior-canvas"
                     style={{ 
                         imageRendering: 'pixelated',
-                        imageRendering: 'crisp-edges',
                         width: '100%',
                         height: '100%'
                     }}

@@ -1,9 +1,10 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useCallback, useState } from 'react';
 
 interface DriverViewProps {
     steeringValue: number;
     onSteer: (value: number) => void;
     onAccelerate: (active: boolean) => void;
+    onCollision?: () => void;
     controlsInverted: boolean;
     speed: number;
     turboActive: boolean;
@@ -11,743 +12,816 @@ interface DriverViewProps {
     traps: any[];
     startPoint: { x: number; z: number };
     endPoint: { x: number; z: number };
+    onTrackGenerated?: (track: Array<{x: number, y: number}>) => void;
+    onConesGenerated?: (cones: Array<{x: number, y: number}>) => void;
+    trackData?: string;
+    clarityActive?: boolean; // Reward from minigame - full visibility
+    minigameActive?: boolean; // Block inputs during minigame
 }
 
-export const DriverView = ({ steeringValue, onSteer, onAccelerate, controlsInverted, speed, turboActive }: DriverViewProps) => {
-    const canvasRef = useRef<HTMLCanvasElement>(null);
-    const gameStateRef = useRef({
-        time: 0,
-        physics: {
-            speed: 0,
-            rpm: 0,
-            curve: 0,
-            maxSpeed: 100, // Increased to match server max speed
-            accel: 0.1,
-            decel: 0.05,
-            turnSpeed: 0.05,
-            maxCurve: 1.5,
-            curveDecay: 0.03
-        },
-        keys: {
-            ArrowUp: false,
-            ArrowDown: false,
-            ArrowLeft: false,
-            ArrowRight: false
-        },
-        scenery: [] as any[]
+// --- CONFIGURACIÓN ---
+
+const VIEW_WIDTH = 800;
+const VIEW_HEIGHT = 600;
+
+// Físicas
+const CAR_MAX_SPEED = 9.0; 
+
+// Configuración Visual
+const TILE_SIZE = 64; 
+const CAMERA_SMOOTHING = 0.8; // Muy rápido para mínimo delay
+
+const PALETTE = {
+  bg: '#000000', 
+  
+  // Colores "Iluminados"
+  grass: '#050a05',       
+  grassDetail: '#0a140a', 
+  track: '#1a1a1a',       
+  trackBorder: '#cc3300', 
+  trackLine: '#999999',   
+  
+  carBody: '#ff0044',
+  carRoof: '#222222',
+  
+  // Luz
+  headlight: 'rgba(200, 230, 255, 0.05)', 
+  
+  cone: '#ff8800',
+  coneStrip: '#cccccc',
+  
+  text: '#00ff00',
+  alert: '#ff0000',
+
+  // Decoraciones
+  signMetal: '#333',
+  signFace: '#999',
+  fastFoodRed: '#880000',
+  fastFoodYellow: '#ccaa00'
+};
+
+// --- GENERADOR DE CIRCUITOS PROCEDURAL ---
+
+const generateProceduralTrack = () => {
+  const points = [];
+  const numPoints = 300; 
+  const baseRadius = 2500; 
+  
+  const layers = [];
+  const numLayers = 6;
+  
+  for(let i = 0; i < numLayers; i++) {
+      layers.push({
+          frequency: Math.floor(Math.random() * 10) + 2, 
+          phase: Math.random() * Math.PI * 2,
+          amplitude: (Math.random() * 800 + 400) / (i + 1.5) 
+      });
+  }
+
+  for (let i = 0; i < numPoints; i++) {
+    const angle = (i / numPoints) * Math.PI * 2;
+    let radiusOffset = 0;
+    
+    layers.forEach(layer => {
+        radiusOffset += Math.sin(angle * layer.frequency + layer.phase) * layer.amplitude;
     });
 
-    // Extended 16-bit Palette
-    const palette = {
-        skyTop: '#2a1d3d',
-        skyMid: '#593a59',
-        skyBot: '#9e626e',
-        sun: '#ffcc33',
-        cloudLight: '#e0d8e8',
-        cloudShadow: '#8f839e',
-        mountainFar: '#221133',
-        mountainNear: '#442244',
-        grassLight: '#2d4d22',
-        grassDark: '#1e3316',
-        road: '#1a1a1a',
-        roadShoulder: '#3a2a1a',
-        roadLine: '#dcb938',
-        dashBase: '#050505',
-        gaugeBg: '#050505',
-        gaugeBorder: '#555555',
-        needle: '#e63946',
-        radioText: '#44ff44',
-        wheel: '#111111',
-        wheelGrip: '#1a1a1a',
-        skin: '#eebb99',
-        skinShadow: '#cfa07a',
-        sleeve: '#6688aa',
-        sleeveShadow: '#446688',
-        leatherStitch: '#333333'
+    const r = Math.max(800, baseRadius + radiusOffset);
+    
+    points.push({
+      x: Math.cos(angle) * r,
+      y: Math.sin(angle) * r
+    });
+  }
+  return points;
+};
+
+const TRACK_WIDTH = 240;
+
+// --- COMPONENTE PRINCIPAL ---
+
+export const DriverView = ({ 
+    onSteer, 
+    onAccelerate, 
+    onCollision,
+    controlsInverted, 
+    speed,
+    carPosition,
+    onTrackGenerated,
+    onConesGenerated,
+    trackData = "",
+    clarityActive = false,
+    minigameActive = false
+}: DriverViewProps) => {
+    const canvasRef = useRef<HTMLCanvasElement>(null);
+    const requestRef = useRef<number | undefined>(undefined);
+    
+    // Refs para que estén siempre actualizados en el render loop
+    const clarityActiveRef = useRef(clarityActive);
+    clarityActiveRef.current = clarityActive;
+    
+    const minigameActiveRef = useRef(minigameActive);
+    minigameActiveRef.current = minigameActive;
+    
+    // Usar el circuito del servidor si está disponible, sino generar uno local como fallback
+    const getTrackPoints = useCallback(() => {
+        if (trackData) {
+            try {
+                const parsed = JSON.parse(trackData);
+                if (Array.isArray(parsed) && parsed.length > 0) {
+                    return parsed;
+                }
+            } catch (e) {
+                console.error("Error parsing trackData:", e);
+            }
+        }
+        return generateProceduralTrack();
+    }, [trackData]);
+
+    const [trackPoints, setTrackPoints] = useState(getTrackPoints());
+    
+    const gameState = useRef({
+        x: 0, y: 0, angle: 0, velocity: { x: 0, y: 0 }, speed: 0,                 
+        camX: 0, camY: 0,
+        keys: { ArrowUp: false, ArrowLeft: false, ArrowRight: false, ArrowDown: false },
+        cones: [] as Array<{x: number, y: number}>, 
+        decorations: [] as Array<{x: number, y: number, type: string, angle: number}>, 
+        skidMarks: [] as Array<{x: number, y: number, life: number}>, 
+        particles: [] as Array<any>, 
+        message: "", shake: 0, collisionCooldown: 0, time: 0,
+        
+        // Feature Toggle
+        debugLight: false
+    });
+
+    const toggleDebugLight = () => {
+        gameState.current.debugLight = !gameState.current.debugLight;
     };
 
-    // Initialize scenery
-    useEffect(() => {
-        const scenery = [];
-        for(let i=0; i<30; i++) {
-            scenery.push({
-                type: Math.random() > 0.85 ? 'pole' : (Math.random() > 0.5 ? 'tree' : 'bush'),
-                z: Math.random() * 100,
-                side: Math.random() > 0.5 ? -1 : 1
-            });
-        }
-        gameStateRef.current.scenery = scenery;
-    }, []);
-
-    // Input handling
-    useEffect(() => {
-        let accelerateInterval: ReturnType<typeof setInterval> | null = null;
+    const resetGame = useCallback((newTrack: Array<{x: number, y: number}>, sendConesToServer: boolean = false) => {
+        const startP = newTrack[0];
+        const nextP = newTrack[1];
         
-        const handleKeyDown = (e: KeyboardEvent) => {
-            if (e.key === "ArrowLeft" || e.key === "a" || e.key === "A") {
+        const cones: Array<{x: number, y: number}> = [];
+        const decorations: Array<{x: number, y: number, type: string, angle: number}> = [];
+
+        for(let i=0; i<newTrack.length; i++) {
+            const p = newTrack[i];
+            
+            // Generar más conos para que haya más obstáculos
+            if(i % 5 === 0 && Math.random() > 0.3) {
+                const offsetX = (Math.random() - 0.5) * (TRACK_WIDTH - 80);
+                const offsetY = (Math.random() - 0.5) * (TRACK_WIDTH - 80);
+                cones.push({ x: p.x + offsetX, y: p.y + offsetY });
+            }
+
+            if (i % 8 === 0 && Math.random() > 0.5) {
+                const nextP = newTrack[(i+1) % newTrack.length];
+                const dx = nextP.x - p.x;
+                const dy = nextP.y - p.y;
+                const len = Math.sqrt(dx*dx + dy*dy);
+                const nx = -dy / len; 
+                const ny = dx / len;
+
+                const side = Math.random() > 0.5 ? 1 : -1;
+                const distFromCenter = TRACK_WIDTH / 2 + 80 + Math.random() * 50;
+                
+                const decX = p.x + nx * distFromCenter * side;
+                const decY = p.y + ny * distFromCenter * side;
+
+                let type = 'SIGN_TURN';
+                if (Math.random() > 0.95) type = 'FAST_FOOD';
+                else if (Math.random() > 0.8) type = 'SIGN_LIMIT';
+
+                decorations.push({ x: decX, y: decY, type, angle: Math.atan2(dy, dx) });
+            }
+        }
+
+        // Preservar debugLight al reiniciar
+        const currentDebug = gameState.current ? gameState.current.debugLight : false;
+
+        gameState.current = {
+            ...gameState.current,
+            x: startP.x,
+            y: startP.y,
+            angle: Math.atan2(nextP.y - startP.y, nextP.x - startP.x),
+            velocity: { x: 0, y: 0 },
+            speed: 0,
+            camX: startP.x,
+            camY: startP.y,
+            cones: cones,
+            decorations: decorations,
+            skidMarks: [],
+            particles: [],
+            message: "NUEVA PISTA",
+            shake: 0,
+            collisionCooldown: 0,
+            time: 0,
+            debugLight: currentDebug
+        };
+
+        // Enviar los conos al servidor para que NavigatorView los pueda ver
+        if (sendConesToServer && onConesGenerated && cones.length > 0) {
+            console.log("Sending cones to server:", cones.length);
+            onConesGenerated(cones);
+        }
+    }, [onConesGenerated]);
+
+    useEffect(() => {
+        // Actualizar pista cuando cambie el trackData del servidor
+        const next = getTrackPoints();
+        setTrackPoints(next);
+        // Generar y enviar conos al servidor cuando se crea/actualiza la pista
+        resetGame(next, true);
+
+        // Solo publicamos el circuito al servidor si NO viene del servidor (fallback local)
+        if (!trackData && onTrackGenerated) {
+            onTrackGenerated(next);
+        }
+    }, [trackData, getTrackPoints, resetGame, onTrackGenerated]); 
+
+    const handleGenerateNewTrack = () => {
+        // If the server is providing a shared track, keep it authoritative so Driver/Navigator stay in sync.
+        if (trackData) {
+            gameState.current.message = "PISTA BLOQUEADA (SERVIDOR)";
+            return;
+        }
+        const newTrack = generateProceduralTrack();
+        setTrackPoints(newTrack);
+        resetGame(newTrack);
+        // Enviar el nuevo circuito al servidor
+        if (onTrackGenerated) {
+            onTrackGenerated(newTrack);
+        }
+    };
+
+    // Sync with server speed
+    useEffect(() => {
+        // Convert server speed (0-100) to game speed (0-9)
+        gameState.current.speed = (speed / 100) * CAR_MAX_SPEED;
+    }, [speed]);
+
+    // Sync with server car position - this is the source of truth
+    useEffect(() => {
+        // Server uses {x, z, angle}, client uses {x, y, angle}
+        gameState.current.x = carPosition.x;
+        gameState.current.y = carPosition.z; // Server z = Client y
+        gameState.current.angle = carPosition.angle;
+        
+        // Camera follows car almost instantly for minimal delay
+        const dx = carPosition.x - gameState.current.camX;
+        const dy = carPosition.z - gameState.current.camY;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        
+        // Snap camera if too far (like after repositioning) or on first load
+        if (dist > 100 || (gameState.current.camX === 0 && gameState.current.camY === 0)) {
+            console.log("📷 Camera snapped to car position");
+            gameState.current.camX = carPosition.x;
+            gameState.current.camY = carPosition.z;
+        }
+    }, [carPosition.x, carPosition.z, carPosition.angle]);
+
+    const handleKeyDown = useCallback((e: KeyboardEvent) => {
+        // Block inputs during minigame
+        if (minigameActiveRef.current) return;
+        
+        if (e.key in gameState.current.keys) {
+            (gameState.current.keys as any)[e.key] = true;
+            
+            if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') {
+                onAccelerate(true);
+            } else if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') {
+                // Brake
+            }
+            
+            if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') {
                 onSteer(controlsInverted ? 1 : -1);
-                gameStateRef.current.keys.ArrowLeft = true;
-            } else if (e.key === "ArrowRight" || e.key === "d" || e.key === "D") {
+            } else if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') {
                 onSteer(controlsInverted ? -1 : 1);
-                gameStateRef.current.keys.ArrowRight = true;
-            } else if (e.key === "ArrowUp" || e.key === "w" || e.key === "W" || e.key === " ") {
-                if (!accelerateInterval) {
-                    onAccelerate(true);
-                    // Keep sending accelerate message while key is held
-                    accelerateInterval = setInterval(() => {
-                        onAccelerate(true);
-                    }, 50); // Send every 50ms
-                }
-                gameStateRef.current.keys.ArrowUp = true;
-            } else if (e.key === "ArrowDown") {
-                gameStateRef.current.keys.ArrowDown = true;
             }
-        };
-
-        const handleKeyUp = (e: KeyboardEvent) => {
-            if (e.key === "ArrowLeft" || e.key === "a" || e.key === "A") {
-                onSteer(0);
-                gameStateRef.current.keys.ArrowLeft = false;
-            } else if (e.key === "ArrowRight" || e.key === "d" || e.key === "D") {
-                onSteer(0);
-                gameStateRef.current.keys.ArrowRight = false;
-            } else if (e.key === "ArrowUp" || e.key === "w" || e.key === "W" || e.key === " ") {
-                if (accelerateInterval) {
-                    clearInterval(accelerateInterval);
-                    accelerateInterval = null;
-                }
-                onAccelerate(false);
-                gameStateRef.current.keys.ArrowUp = false;
-            } else if (e.key === "ArrowDown") {
-                gameStateRef.current.keys.ArrowDown = false;
-            }
-        };
-
-        window.addEventListener("keydown", handleKeyDown);
-        window.addEventListener("keyup", handleKeyUp);
-
-        return () => {
-            window.removeEventListener("keydown", handleKeyDown);
-            window.removeEventListener("keyup", handleKeyUp);
-            if (accelerateInterval) {
-                clearInterval(accelerateInterval);
-            }
-        };
+        }
     }, [onSteer, onAccelerate, controlsInverted]);
 
-    // Update physics from game state with smooth transitions
+    const handleKeyUp = useCallback((e: KeyboardEvent) => {
+        if (e.key in gameState.current.keys) {
+            (gameState.current.keys as any)[e.key] = false;
+            
+            if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') {
+                onAccelerate(false);
+            }
+            
+            if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'a' || e.key === 'A' || e.key === 'd' || e.key === 'D') {
+                onSteer(0);
+            }
+        }
+    }, [onSteer, onAccelerate]);
+
     useEffect(() => {
-        const physics = gameStateRef.current.physics;
-        // Map game speed (0-100) to physics speed (0-100) with smooth transition
-        const targetSpeed = Math.min(speed, physics.maxSpeed);
-        physics.speed += (targetSpeed - physics.speed) * 0.1; // Smooth interpolation
+        window.addEventListener('keydown', handleKeyDown);
+        window.addEventListener('keyup', handleKeyUp);
+        return () => {
+            window.removeEventListener('keydown', handleKeyDown);
+            window.removeEventListener('keyup', handleKeyUp);
+        };
+    }, [handleKeyDown, handleKeyUp]);
+
+    // --- EFECTOS VISUALES ---
+
+    const updatePhysics = () => {
+        const state = gameState.current;
+        state.time++;
         
-        // Map steering value (-1 to 1) to curve with smooth transition
-        const targetCurve = steeringValue * physics.maxCurve;
-        physics.curve += (targetCurve - physics.curve) * 0.15; // Smooth steering transition
-        
-        // RPM based on speed
-        const targetRpm = 0.1 + (physics.speed / physics.maxSpeed) * 0.8;
-        if (speed > 0.1) physics.rpm += 0.1;
-        physics.rpm += (targetRpm - physics.rpm) * 0.1; // Smooth RPM transition
-        physics.rpm = Math.min(physics.rpm, 1.0);
-    }, [speed, steeringValue]);
+        if (state.collisionCooldown > 0) state.collisionCooldown--;
 
-    // Drawing functions
-    const drawRect = (ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, color: string) => {
-        ctx.fillStyle = color;
-        ctx.fillRect(Math.floor(x), Math.floor(y), Math.floor(w), Math.floor(h));
-    };
+        // Camera follows car position directly (fast follow)
+        state.camX += (state.x - state.camX) * CAMERA_SMOOTHING;
+        state.camY += (state.y - state.camY) * CAMERA_SMOOTHING;
 
-    const drawPixelCloud = (ctx: CanvasRenderingContext2D, cx: number, cy: number, scale: number) => {
-        let w = 40 * scale;
-        let h = 15 * scale;
-        
-        ctx.fillStyle = palette.cloudLight;
-        drawRect(ctx, cx - w, cy, w*2, h, palette.cloudLight);
-        drawRect(ctx, cx - w*0.6, cy - h*0.6, w*0.5, h, palette.cloudLight);
-        drawRect(ctx, cx + w*0.1, cy - h*0.8, w*0.6, h, palette.cloudLight);
-        drawRect(ctx, cx - w + 5, cy + h - 5, w*2 - 10, 5, palette.cloudShadow);
-    };
-
-    const drawSky = (ctx: CanvasRenderingContext2D, time: number, curve: number) => {
-        const horizon = 240;
-        
-        let grad = ctx.createLinearGradient(0, 0, 0, horizon);
-        grad.addColorStop(0, palette.skyTop);
-        grad.addColorStop(0.4, palette.skyMid);
-        grad.addColorStop(1, palette.skyBot);
-        ctx.fillStyle = grad;
-        ctx.fillRect(0, 0, 640, horizon);
-
-        let sunX = 320 + (curve * 20);
-        ctx.fillStyle = palette.sun;
-        ctx.beginPath();
-        ctx.arc(sunX, 180, 40, 0, Math.PI*2);
-        ctx.fill();
-        
-        for(let i=0; i<5; i++) {
-            let speedOffset = (time * 0.2); 
-            let curveOffset = (curve * 100);
-            let cx = ((i * 180) + speedOffset + curveOffset) % 800 - 100;
-            let cy = 50 + (i * 20) + Math.sin(i)*10;
-            let scale = 1 + (i*0.2);
-            drawPixelCloud(ctx, cx, cy, scale);
-        }
-    };
-
-    const drawMountains = (ctx: CanvasRenderingContext2D, time: number, curve: number) => {
-        const horizon = 240;
-        
-        ctx.fillStyle = palette.mountainFar;
-        ctx.beginPath();
-        ctx.moveTo(0, horizon);
-        let offsetFar = (time * 0.1) + (curve * 50);
-        for(let x=0; x<=640; x+=10) {
-            let n = Math.sin((x + offsetFar) * 0.02) * 40 + Math.sin((x + offsetFar)*0.08)*10;
-            ctx.lineTo(x, horizon - 50 - n);
-        }
-        ctx.lineTo(640, horizon);
-        ctx.fill();
-
-        ctx.fillStyle = palette.mountainNear;
-        ctx.beginPath();
-        ctx.moveTo(0, horizon);
-        let offsetNear = (time * 0.3) + (curve * 150);
-        for(let x=0; x<=640; x+=20) {
-            let n = Math.sin((x + offsetNear) * 0.03) * 30 + Math.random()*5;
-            ctx.lineTo(x, horizon - 20 - n);
-        }
-        ctx.lineTo(640, horizon);
-        ctx.fill();
-    };
-
-    const drawRoad = (ctx: CanvasRenderingContext2D, time: number, curve: number, speed: number) => {
-        const horizon = 240;
-        const bottom = 480;
-        const centerX = 320;
-
-        ctx.fillStyle = palette.grassLight;
-        ctx.fillRect(0, horizon, 640, 240);
-
-        ctx.fillStyle = 'rgba(0,0,0,0.1)';
-        if (Math.floor(time) % 2 === 0) {
-             ctx.fillRect(0, horizon, 640, 240);
-        }
-
-        const numStrips = 240;
-        const step = 2;
-        
-        let prevY = horizon;
-        let prevW = 10;
-        let prevCurveX = curve * 300;
-        let prevX = centerX + prevCurveX;
-
-        for(let i=step; i<=numStrips; i+=step) {
-             let y = horizon + i;
-             let p = i / 240;
-             
-             let w = 10 + (p * 630);
-             let curveX = curve * 300 * Math.pow(1-p, 2);
-             let x = centerX + curveX;
-
-             ctx.fillStyle = palette.road;
-             ctx.beginPath();
-             ctx.moveTo(prevX - prevW/2, prevY);
-             ctx.lineTo(prevX + prevW/2, prevY);
-             ctx.lineTo(x + w/2, y);
-             ctx.lineTo(x - w/2, y);
-             ctx.fill();
-             
-             ctx.fillStyle = palette.roadShoulder;
-             ctx.beginPath();
-             ctx.moveTo(prevX - prevW/2 - 20, prevY);
-             ctx.lineTo(prevX - prevW/2, prevY);
-             ctx.lineTo(x - w/2, y);
-             ctx.lineTo(x - w/2 - 20, y);
-             ctx.fill();
-             
-             ctx.beginPath();
-             ctx.moveTo(prevX + prevW/2, prevY);
-             ctx.lineTo(prevX + prevW/2 + 20, prevY);
-             ctx.lineTo(x + w/2 + 20, y);
-             ctx.lineTo(x + w/2, y);
-             ctx.fill();
-
-             prevX = x;
-             prevW = w;
-             prevY = y;
-        }
-
-        const stripes = 12;
-        for(let i=0; i<stripes; i++) {
-            let z = (time * speed * 0.5 + i * (100/stripes)) % 100;
-            let p = z / 100; 
-            let renderP = p; 
-            
-            let screenY = horizon + (renderP * renderP * (bottom - horizon));
-            
-            if(screenY > horizon && screenY < bottom) {
-                 let curveP = (screenY - horizon) / (bottom - horizon);
-                 let curveX = curve * 300 * Math.pow(1-curveP, 2);
-                 let x = centerX + curveX;
-                 
-                 let w = 2 + renderP * 20;
-                 drawRect(ctx, x - w/2, screenY, w, 4 + renderP*10, palette.roadLine);
+        // Check for local cone collisions (visual feedback) 
+        let hitIndex = -1;
+        for(let i=0; i<state.cones.length; i++) {
+            const cx = state.cones[i].x;
+            const cy = state.cones[i].y;
+            if (Math.abs(state.x - cx) < 25 && Math.abs(state.y - cy) < 25) { 
+                hitIndex = i; break;
             }
         }
-    };
 
-    const drawScenery = (ctx: CanvasRenderingContext2D, curve: number, speed: number) => {
-        const scenery = gameStateRef.current.scenery;
-        scenery.sort((a, b) => b.z - a.z);
-        
-        scenery.forEach(obj => {
-            obj.z -= speed * 0.1;
+        if (hitIndex !== -1) {
+            state.shake = 15;
+            state.message = "¡CONO!";
+            state.cones.splice(hitIndex, 1);
             
-            if(obj.z <= 0) {
-                obj.z = 100;
-                obj.side = Math.random() > 0.5 ? -1 : 1;
-                obj.type = Math.random() > 0.85 ? 'pole' : (Math.random() > 0.5 ? 'tree' : 'bush');
+            console.log("💥 Cone collision detected!");
+            
+            // Notify server about collision
+            if (onCollision) {
+                console.log("📤 Calling onCollision callback");
+                onCollision();
             }
+        } else if (state.shake === 0 && state.message !== "NUEVA PISTA") {
+            state.message = "";
+        }
 
-            let p = (100 - obj.z) / 100;
-            let y = 240 + (p * p * 240);
-            
-            let curveX = curve * 300 * Math.pow(1-p, 2);
-            let xCenter = 320 + curveX;
-            
-            let spread = 40 + (p * p * 600);
-            let turnShift = curve * 200 * p;
+        // Decay shake effect
+        if (state.shake > 0) state.shake *= 0.85;
+        if (state.shake < 0.3) state.shake = 0;
 
-            let x = xCenter + (obj.side * spread) - turnShift;
-            let scale = p * p * 3.5;
-
-            if(obj.z < 98 && scale > 0.05) {
-                if(obj.type === 'tree') drawObjTree(ctx, x, y, scale);
-                else if(obj.type === 'bush') drawObjBush(ctx, x, y, scale);
-                else drawObjPole(ctx, x, y, scale);
-            }
-        });
-    };
-
-    const drawObjTree = (ctx: CanvasRenderingContext2D, x: number, y: number, s: number) => {
-        let w = 40 * s;
-        let h = 80 * s;
-        drawRect(ctx, x - w*0.15, y - h, w*0.3, h, '#3e2723');
-        ctx.fillStyle = '#1b5e20';
-        for(let i=0; i<3; i++) {
-            let size = w * (1 - i*0.2);
-            let ly = (y - h*0.4) - (i * h * 0.3);
-            ctx.beginPath();
-            ctx.moveTo(x - size, ly);
-            ctx.lineTo(x + size, ly);
-            ctx.lineTo(x, ly - h*0.5);
-            ctx.fill();
+        // Cleanup old skid marks
+        for(let i=state.skidMarks.length-1; i>=0; i--) {
+            state.skidMarks[i].life -= 0.01;
+            if(state.skidMarks[i].life <= 0) state.skidMarks.splice(i, 1);
         }
     };
 
-    const drawObjBush = (ctx: CanvasRenderingContext2D, x: number, y: number, s: number) => {
-        let w = 30 * s;
-        let h = 20 * s;
-        ctx.fillStyle = '#2e7d32';
-        ctx.beginPath();
-        ctx.ellipse(x, y-h/2, w, h, 0, Math.PI, 0); 
-        ctx.fill();
-        if (s > 0.5) {
-            ctx.fillStyle = '#ef5350';
-            drawRect(ctx, x - w*0.5, y - h*0.8, 4*s, 4*s, '#ef5350');
-            drawRect(ctx, x + w*0.3, y - h*0.6, 4*s, 4*s, '#ef5350');
-        }
-    };
+    // --- RENDERIZADO ---
 
-    const drawObjPole = (ctx: CanvasRenderingContext2D, x: number, y: number, s: number) => {
-        let w = 8 * s;
-        let h = 100 * s;
-        drawRect(ctx, x - w/2, y - h, w, h, '#78909c');
-        drawRect(ctx, x - w, y - h, w*4, 4*s, '#78909c');
-        ctx.fillStyle = '#fff9c4';
-        ctx.fillRect(x + w, y - h + 4*s, 3*s, 3*s);
-    };
-
-    const drawClusterHousing = (ctx: CanvasRenderingContext2D, x: number, y: number) => {
-        ctx.fillStyle = '#080808';
-        ctx.beginPath();
-        ctx.arc(x, y, 75, 0, Math.PI*2);
-        ctx.fill();
-        ctx.strokeStyle = '#333';
-        ctx.lineWidth = 4;
-        ctx.stroke();
-    };
-
-    const drawGauge = (ctx: CanvasRenderingContext2D, x: number, y: number, r: number, val: number, label: string) => {
-        ctx.fillStyle = palette.gaugeBg;
-        ctx.beginPath();
-        ctx.arc(x, y, r-4, 0, Math.PI*2);
-        ctx.fill();
-
-        ctx.strokeStyle = '#fff';
-        ctx.lineWidth = 2;
-        for(let i=0; i<=10; i++) {
-            let angle = Math.PI*0.8 + (i/10) * (Math.PI*1.4);
-            let len = i % 5 === 0 ? 10 : 5;
-            let tx = x + Math.cos(angle) * (r - len - 5);
-            let ty = y + Math.sin(angle) * (r - len - 5);
-            let ox = x + Math.cos(angle) * (r - 5);
-            let oy = y + Math.sin(angle) * (r - 5);
-            ctx.beginPath();
-            ctx.moveTo(ox, oy);
-            ctx.lineTo(tx, ty);
-            ctx.stroke();
-        }
-
-        ctx.fillStyle = '#888';
-        ctx.font = '10px sans-serif';
-        ctx.fillText(label, x - 15, y + r/2);
-
-        let angle = Math.PI*0.8 + val * (Math.PI*1.4);
-        
-        ctx.strokeStyle = palette.needle;
-        ctx.lineWidth = 3;
-        ctx.beginPath();
-        ctx.moveTo(x, y);
-        ctx.lineTo(x + Math.cos(angle)*(r-10), y + Math.sin(angle)*(r-10));
-        ctx.stroke();
-        
-        ctx.fillStyle = '#333';
-        ctx.beginPath();
-        ctx.arc(x, y, 6, 0, Math.PI*2);
-        ctx.fill();
-    };
-
-    const drawDashboard = (ctx: CanvasRenderingContext2D, rpm: number, gameSpeed: number) => {
-        const height = 480;
-        const dashTop = 320;
-
-        ctx.fillStyle = palette.dashBase;
-        ctx.beginPath();
-        ctx.moveTo(0, height);
-        ctx.lineTo(0, dashTop);
-        ctx.bezierCurveTo(100, dashTop - 20, 220, dashTop - 10, 320, dashTop);
-        ctx.bezierCurveTo(420, dashTop - 10, 540, dashTop - 20, 640, dashTop);
-        ctx.lineTo(640, height);
-        ctx.fill();
-
-        ctx.strokeStyle = palette.leatherStitch;
-        ctx.lineWidth = 2;
-        ctx.setLineDash([4, 4]);
-        ctx.beginPath();
-        ctx.moveTo(0, dashTop + 10);
-        ctx.bezierCurveTo(100, dashTop - 10, 220, dashTop, 320, dashTop + 10);
-        ctx.bezierCurveTo(420, dashTop, 540, dashTop - 10, 640, dashTop + 10);
-        ctx.stroke();
-        ctx.setLineDash([]); 
-
-        drawClusterHousing(ctx, 140, 390);
-        drawClusterHousing(ctx, 500, 390);
-
-        // Use game speed for gauge (0-100 from server, display as 0-1000 km/h)
-        let speedVal = gameSpeed / 100; // Normalize to 0-1 (max speed is 100)
-        drawGauge(ctx, 140, 390, 70, speedVal, "SPEED");
-        drawGauge(ctx, 500, 390, 70, rpm, "RPM");
-
-        // Display actual speed number
-        ctx.fillStyle = '#00ff00';
-        ctx.font = 'bold 16px monospace';
-        ctx.textAlign = 'center';
-        const speedKmh = Math.floor(gameSpeed * 10); // Convert to km/h (game speed 0-100 -> 0-1000 km/h)
-        ctx.fillText(`${speedKmh}`, 140, 390 + 50);
-        ctx.font = '10px monospace';
-        ctx.fillText('KM/H', 140, 390 + 65);
-
-        const cx = 320;
-        const cy = 420;
-        
-        drawRect(ctx, cx - 30, cy, 60, 20, '#000');
-        ctx.fillStyle = palette.radioText;
-        ctx.font = '10px monospace';
-        const radioText = turboActive ? 'TURBO 88.8' : 'RADIO 88.8';
-        ctx.fillText(radioText, cx - 28, cy + 14);
-    };
-
-    const drawWheel = (ctx: CanvasRenderingContext2D, curve: number, rpm: number, time: number) => {
-        const cx = 320;
-        const cy = 400; 
-        const r = 90;
-
+    const drawDecoration = (ctx: CanvasRenderingContext2D, dec: {x: number, y: number, type: string, angle: number}) => {
         ctx.save();
-        ctx.translate(cx, cy);
+        ctx.translate(Math.round(dec.x), Math.round(dec.y));
         
-        let rot = curve * 1.5;
-        let vibe = (rpm > 0.1) ? Math.sin(time) * 1 : 0;
-        ctx.rotate(rot + vibe * 0.005);
+        if (dec.type === 'FAST_FOOD') {
+            ctx.fillStyle = PALETTE.fastFoodRed;
+            ctx.fillRect(-4, -40, 8, 40);
+            ctx.fillStyle = PALETTE.fastFoodYellow;
+            ctx.fillRect(-20, -60, 10, 30); 
+            ctx.fillRect(10, -60, 10, 30);  
+            ctx.fillRect(-10, -45, 10, 15); 
+            ctx.fillRect(0, -45, 10, 15);   
+            ctx.fillStyle = '#999';
+            ctx.fillRect(-25, -25, 50, 12);
+            ctx.fillStyle = '#000';
+            ctx.fillRect(-20, -22, 4, 4); 
+            ctx.fillRect(-12, -22, 4, 4);
+        } else if (dec.type === 'SIGN_TURN') {
+            ctx.rotate(dec.angle + Math.PI/2);
+            ctx.fillStyle = PALETTE.signMetal;
+            ctx.fillRect(-14, -2, 4, 4);
+            ctx.fillRect(10, -2, 4, 4);
+            ctx.fillStyle = PALETTE.signFace;
+            ctx.fillRect(-20, -12, 40, 20); 
+            ctx.fillStyle = '#aa8800'; 
+            ctx.fillRect(-10, -2, 4, 4);
+            ctx.fillRect(-5, -6, 4, 4);
+            ctx.fillRect(0, -10, 4, 4);
+            ctx.fillRect(5, -6, 4, 4);
+            ctx.fillRect(10, -2, 4, 4);
+        } else if (dec.type === 'SIGN_LIMIT') {
+            ctx.fillStyle = '#555';
+            ctx.fillRect(-2, -2, 4, 4); 
+            ctx.fillStyle = '#999';
+            ctx.strokeStyle = '#800';
+            ctx.lineWidth = 4;
+            ctx.beginPath();
+            ctx.moveTo(-10, -5); ctx.lineTo(-5, -10); ctx.lineTo(5, -10); ctx.lineTo(10, -5);
+            ctx.lineTo(10, 5); ctx.lineTo(5, 10); ctx.lineTo(-5, 10); ctx.lineTo(-10, 5);
+            ctx.closePath();
+            ctx.fill(); ctx.stroke();
+        }
+        ctx.restore();
+    };
 
-        ctx.lineWidth = 18;
-        ctx.strokeStyle = palette.wheel;
-        ctx.beginPath();
-        ctx.arc(0, 0, r, 0, Math.PI*2);
-        ctx.stroke();
+    const draw = (ctx: CanvasRenderingContext2D) => {
+        const state = gameState.current;
         
-        ctx.lineWidth = 14;
-        ctx.strokeStyle = palette.wheelGrip;
+        // 1. FONDO NEGRO
+        ctx.fillStyle = PALETTE.bg;
+        ctx.fillRect(0, 0, VIEW_WIDTH, VIEW_HEIGHT);
+
+        const screenCX = VIEW_WIDTH / 2;
+        const screenCY = VIEW_HEIGHT / 2;
+        const shakeX = Math.round((Math.random() - 0.5) * state.shake);
+        const shakeY = Math.round((Math.random() - 0.5) * state.shake);
+        
+        const carScreenX = Math.round(screenCX + shakeX);
+        const carScreenY = Math.round(screenCY + shakeY);
+        
+        // Server uses: x += sin(angle), z += cos(angle)
+        // So angle=0 means moving in +z direction (down on screen)
+        // Sprite faces right (+x) by default
+        // To align sprite with movement direction: drawAngle = PI/2 - angle
+        const drawAngle = Math.PI / 2 - state.angle;
+
+        // 2. MÁSCARA DE LUZ (RECORTE)
+        // Solo aplicamos recorte si NO estamos en modo debug
+        ctx.save();
+        
+        // clarityActive or debugLight = full visibility (no fog)
+        const hasFullVisibility = state.debugLight || clarityActiveRef.current;
+        
+        if (!hasFullVisibility) {
+            ctx.beginPath();
+            ctx.moveTo(carScreenX, carScreenY);
+            
+            const lightDist = 160; 
+            const lightWidth = Math.PI / 3.5; 
+            
+            const lx = carScreenX + Math.cos(drawAngle - lightWidth/2) * lightDist;
+            const ly = carScreenY + Math.sin(drawAngle - lightWidth/2) * lightDist;
+            const rx = carScreenX + Math.cos(drawAngle + lightWidth/2) * lightDist;
+            const ry = carScreenY + Math.sin(drawAngle + lightWidth/2) * lightDist;
+            
+            ctx.lineTo(lx, ly);
+            ctx.lineTo(
+                carScreenX + Math.cos(drawAngle) * (lightDist * 1.1), 
+                carScreenY + Math.sin(drawAngle) * (lightDist * 1.1)
+            );
+            ctx.lineTo(rx, ry);
+            ctx.lineTo(carScreenX, carScreenY);
+            ctx.clip(); 
+        }
+
+        // 3. DIBUJAR MUNDO
+        ctx.translate(screenCX - state.camX + shakeX, screenCY - state.camY + shakeY);
+
+        // -- Suelo
+        const startX = Math.floor((state.camX - 300) / TILE_SIZE) * TILE_SIZE;
+        const startY = Math.floor((state.camY - 300) / TILE_SIZE) * TILE_SIZE;
+        for (let x = startX; x < startX + 600; x += TILE_SIZE) {
+            for (let y = startY; y < startY + 600; y += TILE_SIZE) {
+                const noise = ((Math.floor(x/100) + Math.floor(y/100)) % 2 === 0);
+                ctx.fillStyle = noise ? PALETTE.grass : PALETTE.grassDetail;
+                ctx.fillRect(x, y, TILE_SIZE, TILE_SIZE);
+            }
+        }
+
+        // -- Pista
+        ctx.lineCap = 'square'; 
+        ctx.lineJoin = 'miter';
         ctx.beginPath();
-        ctx.arc(0, 0, r, Math.PI*1.1, Math.PI*1.9); 
-        ctx.stroke();
-        ctx.beginPath();
-        ctx.arc(0, 0, r, Math.PI*0.1, Math.PI*0.9);
+        ctx.strokeStyle = PALETTE.trackBorder;
+        ctx.lineWidth = TRACK_WIDTH + 24; 
+        ctx.moveTo(trackPoints[0].x, trackPoints[0].y);
+        for (let i = 1; i < trackPoints.length; i++) ctx.lineTo(trackPoints[i].x, trackPoints[i].y);
+        ctx.closePath();
         ctx.stroke();
 
-        ctx.fillStyle = palette.wheel;
         ctx.beginPath();
-        ctx.arc(0, 0, 25, 0, Math.PI*2);
-        ctx.fill();
+        ctx.strokeStyle = PALETTE.track;
+        ctx.lineWidth = TRACK_WIDTH;
+        ctx.moveTo(trackPoints[0].x, trackPoints[0].y);
+        for (let i = 1; i < trackPoints.length; i++) ctx.lineTo(trackPoints[i].x, trackPoints[i].y);
+        ctx.closePath();
+        ctx.stroke();
 
-        for(let i=0; i<3; i++) {
+        ctx.beginPath();
+        ctx.strokeStyle = PALETTE.trackLine;
+        ctx.lineWidth = 6;
+        ctx.setLineDash([40, 40]);
+        ctx.moveTo(trackPoints[0].x, trackPoints[0].y);
+        for (let i = 1; i < trackPoints.length; i++) ctx.lineTo(trackPoints[i].x, trackPoints[i].y);
+        ctx.closePath();
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // === FINISH LINE ===
+        if (trackPoints.length > 1) {
+            const p0 = trackPoints[0];
+            const p1 = trackPoints[1];
+            // Calculate direction
+            const dx = p1.x - p0.x;
+            const dy = p1.y - p0.y;
+            
+            // Draw checkered pattern
+            const numSquares = 8;
+            const squareSize = (TRACK_WIDTH + 20) / numSquares;
+            
             ctx.save();
-            ctx.rotate(i * (Math.PI * 2 / 3) + Math.PI/2);
-            ctx.fillRect(-10, 0, 20, r-5);
+            ctx.translate(p0.x, p0.y);
+            ctx.rotate(Math.atan2(dy, dx));
+            
+            for (let i = 0; i < numSquares; i++) {
+                for (let j = 0; j < 2; j++) {
+                    const isWhite = (i + j) % 2 === 0;
+                    ctx.fillStyle = isWhite ? '#ffffff' : '#000000';
+                    ctx.fillRect(
+                        -squareSize + j * squareSize,
+                        -TRACK_WIDTH / 2 - 10 + i * squareSize,
+                        squareSize,
+                        squareSize
+                    );
+                }
+            }
             ctx.restore();
         }
 
-        ctx.fillStyle = '#d4af37'; 
-        ctx.fillRect(-5, -5, 10, 10);
+        state.skidMarks.forEach(skid => {
+            ctx.fillStyle = '#111';
+            ctx.globalAlpha = skid.life;
+            ctx.fillRect(Math.round(skid.x - 4), Math.round(skid.y - 4), 8, 8);
+        });
+        ctx.globalAlpha = 1.0;
 
-        ctx.restore();
-    };
+        // Dibujar conos locales (estos son los obstáculos del juego)
+        state.cones.forEach(cone => {
+            // En modo clarity/debug dibujamos todos, en modo normal solo cercanos
+            if(hasFullVisibility || (Math.abs(cone.x - state.x) < 400 && Math.abs(cone.y - state.y) < 400)) {
+                const cx = Math.round(cone.x);
+                const cy = Math.round(cone.y);
+                
+                // Efecto de brillo/pulso
+                const pulse = 1 + Math.sin(state.time * 0.15) * 0.2;
+                
+                // Brillo exterior
+                ctx.fillStyle = 'rgba(255, 100, 0, 0.3)';
+                ctx.beginPath();
+                ctx.arc(cx, cy, 14 * pulse, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Cuerpo del cono
+                ctx.fillStyle = PALETTE.cone;
+                ctx.beginPath();
+                ctx.arc(cx, cy, 10, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Centro
+                ctx.fillStyle = PALETTE.coneStrip;
+                ctx.beginPath();
+                ctx.arc(cx, cy, 4, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Borde negro
+                ctx.strokeStyle = '#000';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.arc(cx, cy, 10, 0, Math.PI * 2);
+                ctx.stroke();
+            }
+        });
 
-    const drawHands = (ctx: CanvasRenderingContext2D, curve: number) => {
-        const cx = 320;
-        const cy = 400;
-        const r = 85;
+        state.decorations.forEach(dec => {
+            if(hasFullVisibility || (Math.abs(dec.x - state.x) < 300 && Math.abs(dec.y - state.y) < 300)) {
+                drawDecoration(ctx, dec);
+            }
+        });
+
+        // 4. TINTE DE LUZ (ATENUADO)
+        ctx.restore(); // Quita transform y clip
         
-        let rot = curve * 1.5;
-        
-        let leftAngle = Math.PI - 0.5 + rot;
-        let rightAngle = 0 - 0.5 + rot;
+        // Si no estamos en clarity/debug, aplicamos el fade out a la luz
+        if (!hasFullVisibility) {
+            ctx.globalCompositeOperation = 'destination-in'; 
+            ctx.save();
+            ctx.translate(carScreenX, carScreenY);
+            ctx.rotate(drawAngle);
 
-        let lx = cx + Math.cos(leftAngle) * r;
-        let ly = cy + Math.sin(leftAngle) * r;
-        
-        let rx = cx + Math.cos(rightAngle) * r;
-        let ry = cy + Math.sin(rightAngle) * r;
+            const lightDist = 160; 
+            const fadeGrad = ctx.createRadialGradient(0, 0, 0, lightDist, 0, lightDist * 0.5);
+            fadeGrad.addColorStop(0, 'rgba(0, 0, 0, 0.85)');
+            fadeGrad.addColorStop(0.5, 'rgba(0, 0, 0, 0.4)'); 
+            fadeGrad.addColorStop(1, 'rgba(0, 0, 0, 0.0)'); 
 
-        drawHandArm(ctx, lx, ly, -1);
-        drawHandArm(ctx, rx, ry, 1);
-    };
-
-    const drawHandArm = (ctx: CanvasRenderingContext2D, x: number, y: number, side: number) => {
-        ctx.fillStyle = palette.sleeve;
-        ctx.beginPath();
-        ctx.moveTo(x, y);
-        
-        if(side === -1) {
-            ctx.lineTo(0, 480);
-            ctx.lineTo(100, 480);
-        } else {
-            ctx.lineTo(640, 480);
-            ctx.lineTo(540, 480);
+            ctx.fillStyle = fadeGrad;
+            ctx.beginPath();
+            ctx.moveTo(0, 0);
+            ctx.arc(0, 0, lightDist + 20, -Math.PI/2, Math.PI/2);
+            ctx.fill();
+            ctx.restore();
         }
-        ctx.lineTo(x + (side*20), y + 20);
-        ctx.fill();
 
-        ctx.fillStyle = palette.skin;
+        // Color tenue (siempre dibujar un poco para ambiente)
+        ctx.globalCompositeOperation = 'screen'; 
         ctx.save();
-        ctx.translate(x, y);
-        ctx.rotate(gameStateRef.current.physics.curve);
-        drawRect(ctx, -15, -15, 30, 30, palette.skin);
+        ctx.translate(carScreenX, carScreenY);
+        ctx.rotate(drawAngle);
+
+        ctx.fillStyle = PALETTE.headlight;
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(200, -80);
+        ctx.lineTo(220, 0);
+        ctx.lineTo(200, 80);
+        ctx.lineTo(0,0);
+        ctx.fill();
         
-        ctx.fillStyle = palette.skinShadow;
-        drawRect(ctx, -10, -10, 8, 20, palette.skinShadow);
-        drawRect(ctx, 2, -10, 8, 20, palette.skinShadow);
         ctx.restore();
+        ctx.globalCompositeOperation = 'source-over';
+
+        // 5. COCHE
+        ctx.save();
+        ctx.translate(carScreenX, carScreenY);
+        ctx.rotate(drawAngle);
+
+        ctx.fillStyle = 'rgba(0,0,0,0.5)';
+        ctx.fillRect(-20, -10, 44, 24);
+
+        ctx.fillStyle = '#000';
+        ctx.fillRect(-18, -14, 10, 4); 
+        ctx.fillRect(-18, 10, 10, 4);  
+        ctx.fillRect(18, -14, 10, 4);  
+        ctx.fillRect(18, 10, 10, 4);   
+
+        ctx.fillStyle = PALETTE.carBody;
+        ctx.fillRect(-20, -12, 44, 24);
+        
+        ctx.fillStyle = PALETTE.carRoof;
+        ctx.fillRect(-10, -10, 20, 20);
+        
+        ctx.fillStyle = '#112233';
+        ctx.fillRect(10, -9, 4, 18); 
+        ctx.fillRect(-12, -9, 2, 18); 
+
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(24, -10, 4, 6); 
+        ctx.fillRect(24, 4, 4, 6);
+
+        ctx.fillStyle = '#550000';
+        ctx.fillRect(-22, -10, 2, 6);
+        ctx.fillRect(-22, 4, 2, 6);
+
+        ctx.restore();
+
+        // 6. UI
+        ctx.font = 'bold 20px monospace';
+        ctx.textAlign = 'left';
+        ctx.fillStyle = PALETTE.text;
+        ctx.fillText(`VEL: ${Math.round(Math.abs(state.speed) * 10)} KM/H`, 20, 30);
+        
+        if (state.message) {
+            ctx.fillStyle = PALETTE.alert;
+            ctx.textAlign = 'center';
+            ctx.fillText(state.message, VIEW_WIDTH/2, VIEW_HEIGHT - 50);
+        }
+        
+        // CLARITY EFFECT - glowing border when active
+        if (clarityActiveRef.current) {
+            const pulse = 0.5 + Math.sin(state.time * 0.2) * 0.3;
+            ctx.strokeStyle = `rgba(0, 255, 136, ${pulse})`;
+            ctx.lineWidth = 8;
+            ctx.strokeRect(4, 4, VIEW_WIDTH - 8, VIEW_HEIGHT - 8);
+            
+            // Inner glow
+            ctx.strokeStyle = `rgba(0, 255, 136, ${pulse * 0.5})`;
+            ctx.lineWidth = 16;
+            ctx.strokeRect(12, 12, VIEW_WIDTH - 24, VIEW_HEIGHT - 24);
+            
+            // Text indicator
+            ctx.font = 'bold 16px monospace';
+            ctx.fillStyle = `rgba(0, 255, 136, ${pulse + 0.3})`;
+            ctx.textAlign = 'center';
+            ctx.fillText('👁️ CLARIDAD ACTIVA', VIEW_WIDTH / 2, 30);
+        }
     };
 
-    const drawRearViewMirror = (ctx: CanvasRenderingContext2D, curve: number) => {
-        const mx = 270, my = 40, mw = 100, mh = 30;
+    const tick = useCallback(() => {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
         
-        ctx.fillStyle = '#111';
-        ctx.fillRect(mx, my, mw, mh);
+        updatePhysics();
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
         
-        drawRect(ctx, mx + mw/2 - 5, 0, 10, my, '#222');
+        ctx.imageSmoothingEnabled = false; 
+        draw(ctx);
+        requestRef.current = requestAnimationFrame(tick);
+    }, []);
 
-        ctx.save();
-        ctx.beginPath();
-        ctx.rect(mx+4, my+4, mw-8, mh-8);
-        ctx.clip();
-
-        ctx.fillStyle = palette.skyTop;
-        ctx.fillRect(mx, my, mw, mh);
-        
-        let mirrorCurve = -curve * 10;
-        
-        ctx.fillStyle = '#222';
-        ctx.beginPath();
-        ctx.moveTo(mx + mw/2 + mirrorCurve, my + mh/2);
-        ctx.lineTo(mx + mw, my + mh);
-        ctx.lineTo(mx, my + mh);
-        ctx.fill();
-
-        ctx.restore();
-    };
-
-    // Main render loop
     useEffect(() => {
         const canvas = canvasRef.current;
         if (!canvas) return;
-
-        const ctx = canvas.getContext('2d');
-        if (!ctx) return;
-
-        // Set internal resolution
-        const internalWidth = 640;
-        const internalHeight = 480;
-        canvas.width = internalWidth;
-        canvas.height = internalHeight;
-
-        // Handle resize for responsive fullscreen
-        const handleResize = () => {
-            const container = canvas.parentElement;
-            if (container) {
-                const containerWidth = container.clientWidth;
-                const containerHeight = container.clientHeight;
-                
-                // Calculate scale to fit container while maintaining aspect ratio
-                const scaleX = containerWidth / internalWidth;
-                const scaleY = containerHeight / internalHeight;
-                const scale = Math.min(scaleX, scaleY);
-                
-                canvas.style.width = `${internalWidth * scale}px`;
-                canvas.style.height = `${internalHeight * scale}px`;
-            }
-        };
-
-        handleResize();
-        window.addEventListener('resize', handleResize);
-
-        let animationFrameId: number;
-        let lastTime = performance.now();
-        const loop = (currentTime: number) => {
-            const state = gameStateRef.current;
-            const deltaTime = (currentTime - lastTime) / 1000; // Convert to seconds
-            lastTime = currentTime;
-            
-            // Use actual game speed for visual movement (speed is 0-100 from server)
-            // Use full speed for rendering
-            const visualSpeed = Math.min(speed, state.physics.maxSpeed);
-            
-            // Smooth physics updates every frame
-            state.physics.speed += (visualSpeed - state.physics.speed) * 0.1;
-            
-            const targetCurve = steeringValue * state.physics.maxCurve;
-            state.physics.curve += (targetCurve - state.physics.curve) * 0.15;
-            
-            // RPM based on actual game speed
-            const targetRpm = 0.1 + (speed / 100) * 0.8; // Use actual game speed (0-100)
-            state.physics.rpm += (targetRpm - state.physics.rpm) * 0.1;
-            state.physics.rpm = Math.min(state.physics.rpm, 1.0);
-            
-            // Update time based on actual game speed for visual movement
-            // Use actual speed from server, not interpolated speed
-            state.time += speed * deltaTime * 2; // Scale for visual effect
-
-            ctx.clearRect(0, 0, internalWidth, internalHeight);
-
-            drawSky(ctx, state.time, state.physics.curve);
-            drawMountains(ctx, state.time, state.physics.curve);
-            // Use actual game speed for road movement
-            drawRoad(ctx, state.time, state.physics.curve, speed);
-            // Use actual game speed for scenery movement
-            drawScenery(ctx, state.physics.curve, speed);
-            
-            // Pass actual game speed to dashboard
-            drawDashboard(ctx, state.physics.rpm, speed);
-            drawWheel(ctx, state.physics.curve, state.physics.rpm, state.time);
-            drawHands(ctx, state.physics.curve);
-            drawRearViewMirror(ctx, state.physics.curve);
-            
-            animationFrameId = requestAnimationFrame(loop);
-        };
-
-        lastTime = performance.now();
-        loop(performance.now());
-
+        
+        canvas.width = VIEW_WIDTH;
+        canvas.height = VIEW_HEIGHT;
+        
+        requestRef.current = requestAnimationFrame(tick);
         return () => {
-            window.removeEventListener('resize', handleResize);
-            if (animationFrameId) {
-                cancelAnimationFrame(animationFrameId);
+            if (requestRef.current) {
+                cancelAnimationFrame(requestRef.current);
             }
         };
-    }, [speed, steeringValue, turboActive]);
+    }, [tick, trackPoints]);
 
     return (
-        <div className="pixel-view driver-view" style={{ 
-            background: '#050505',
-            width: '100vw',
-            height: '100vh',
+        <div style={{
+            margin: 0,
+            backgroundColor: '#000',
             display: 'flex',
-            justifyContent: 'center',
+            flexDirection: 'column',
             alignItems: 'center',
-            overflow: 'hidden',
-            padding: 0,
-            margin: 0
+            justifyContent: 'center',
+            minHeight: '100vh',
+            fontFamily: "'Courier New', Courier, monospace",
+            color: '#ccc',
+            padding: '16px'
         }}>
-            <div className="game-container" style={{
+            <div style={{
                 position: 'relative',
-                width: '100%',
-                height: '100%',
-                display: 'flex',
-                justifyContent: 'center',
-                alignItems: 'center',
-                background: '#000'
+                border: '8px solid #333',
+                borderRadius: '8px',
+                boxShadow: '0 0 30px rgba(0,0,0,0.9)',
+                backgroundColor: '#000',
+                overflow: 'hidden'
             }}>
                 <canvas 
-                    ref={canvasRef}
+                    ref={canvasRef} 
+                    width={VIEW_WIDTH} 
+                    height={VIEW_HEIGHT}
                     style={{
                         display: 'block',
-                        imageRendering: 'pixelated',
-                        maxWidth: '100%',
-                        maxHeight: '100%',
-                        width: 'auto',
-                        height: 'auto'
+                        imageRendering: 'pixelated' as any
                     }}
-                ></canvas>
-                <div className="scanlines" style={{
+                />
+                <div style={{
                     position: 'absolute',
-                    top: 0,
-                    left: 0,
-                    width: '100%',
-                    height: '100%',
-                    background: 'repeating-linear-gradient(to bottom, rgba(0,0,0,0), rgba(0,0,0,0) 2px, rgba(0,0,0,0.15) 3px, rgba(0,0,0,0.15) 4px)',
+                    inset: 0,
                     pointerEvents: 'none',
-                    zIndex: 10
+                    backgroundImage: `linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06))`,
+                    backgroundSize: "100% 4px, 6px 100%"
                 }}></div>
-                <div className="vignette" style={{
-                    position: 'absolute',
-                    top: 0,
-                    left: 0,
-                    width: '100%',
-                    height: '100%',
-                    background: 'radial-gradient(circle, rgba(0,0,0,0) 60%, rgba(0,0,0,0.4) 100%)',
-                    pointerEvents: 'none',
-                    zIndex: 11
-                }}></div>
-                <div className="instructions" style={{
-                    position: 'absolute',
-                    bottom: '20px',
-                    left: 0,
-                    width: '100%',
-                    textAlign: 'center',
-                    color: 'rgba(255,255,255,0.6)',
-                    fontSize: '14px',
-                    fontFamily: 'Courier New, monospace',
-                    pointerEvents: 'none',
-                    zIndex: 12,
-                    textTransform: 'uppercase',
-                    textShadow: '2px 2px 4px rgba(0,0,0,0.8)'
-                }}>
-                    {controlsInverted ? '⚠️ CONTROLS INVERTED' : '← → to steer | ↑ to accelerate'}
-                    {turboActive && ' | ⚡ TURBO ACTIVE'}
-                </div>
+            </div>
+            
+            <div style={{
+                display: 'flex',
+                gap: '16px',
+                marginTop: '24px'
+            }}>
+                <button 
+                    onClick={handleGenerateNewTrack}
+                    style={{
+                        padding: '8px 24px',
+                        backgroundColor: '#ff5500',
+                        color: '#fff',
+                        fontWeight: 'bold',
+                        border: 'none',
+                        borderRadius: '4px',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s'
+                    }}
+                    onMouseDown={(e) => e.currentTarget.style.transform = 'scale(0.95)'}
+                    onMouseUp={(e) => e.currentTarget.style.transform = 'scale(1)'}
+                >
+                    GENERAR NUEVA PISTA
+                </button>
+                <button 
+                    onClick={toggleDebugLight}
+                    style={{
+                        padding: '8px 24px',
+                        backgroundColor: '#333',
+                        color: '#fff',
+                        fontWeight: 'bold',
+                        border: '1px solid #555',
+                        borderRadius: '4px',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s'
+                    }}
+                    onMouseDown={(e) => e.currentTarget.style.transform = 'scale(0.95)'}
+                    onMouseUp={(e) => e.currentTarget.style.transform = 'scale(1)'}
+                >
+                    MODO DEBUG: LUZ
+                </button>
+            </div>
+
+            <div style={{
+                marginTop: '16px',
+                display: 'flex',
+                gap: '32px',
+                fontSize: '12px',
+                textTransform: 'uppercase',
+                letterSpacing: '2px',
+                color: '#666'
+            }}>
+                <div><span style={{color: '#fff', fontWeight: 'bold'}}>⬆</span> Acelerar</div>
+                <div><span style={{color: '#fff', fontWeight: 'bold'}}>⬅ ⮕</span> Girar</div>
             </div>
         </div>
     );

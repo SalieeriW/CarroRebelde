@@ -1,9 +1,10 @@
 import http from "http";
 import express from "express";
 import cors from "cors";
-import { Server } from "colyseus";
+import { Server, matchMaker } from "colyseus";
 import { GameRoom } from "./rooms/GameRoom";
 import os from "os";
+import { initDatabase, getUserByUsername, getUserById, createUser, usernameExists } from "./database";
 
 const port = Number(process.env.PORT || 2567);
 const app = express();
@@ -27,20 +28,63 @@ interface RoomInfo {
   roomId: string;
   code: string;
   players: number;
+  monitorId?: string; // ID del monitor que creó la sala
+  assignedPlayers: string[]; // IDs de jugadores asignados
 }
 
 const activeRooms = new Map<string, RoomInfo>();
+
+// ========== AUTHENTICATION SYSTEM ==========
+
+const MONITOR_SECRET_CODE = "BITS2025";
+
+// Users are now stored in PostgreSQL database (see database.ts)
+// Token to user ID mapping still in memory (tokens are ephemeral)
+
+// Waiting players queue (players waiting to be assigned by a monitor)
+interface WaitingPlayer {
+  oduderId: string;
+  username: string;
+  joinedAt: Date;
+}
+
+const waitingPlayers = new Map<string, WaitingPlayer>();
+
+// Generate simple token (in production, use JWT)
+const generateToken = (userId: string): string => {
+  return `${userId}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+};
+
+// Token to user mapping
+const tokens = new Map<string, string>(); // token -> oduderId
+
+// Minigame sessions storage
+interface MinigameSession {
+  sessionId: string;
+  roomCode: string;
+  startTime: number;
+  result: "pending" | "won" | "lost";
+}
+
+const minigameSessions = new Map<string, MinigameSession>();
+
+// Store room instances by roomCode for minigame callbacks
+const roomsByCode = new Map<string, any>();
+
+// Export for global access
+(global as any).minigameSessions = minigameSessions;
+(global as any).roomsByCode = roomsByCode;
 
 // Endpoint para listar rooms disponibles
 app.get("/rooms", (req, res) => {
   try {
     const roomList = Array.from(activeRooms.values())
-      .filter(room => room.players < 4)
+      .filter(room => room.players < 2)
       .map(room => ({
         roomId: room.roomId,
         code: room.code,
         players: room.players,
-        maxPlayers: 4,
+        maxPlayers: 2,
       }));
 
     res.json(roomList);
@@ -52,6 +96,382 @@ app.get("/rooms", (req, res) => {
 
 // Export activeRooms map for GameRoom to use
 (global as any).activeRooms = activeRooms;
+
+// ========== AUTH ENDPOINTS ==========
+
+// Register new user
+app.post("/auth/register", (req, res) => {
+  try {
+    const { username, password, monitorCode } = req.body;
+    
+    if (!username || !password) {
+      return res.status(400).json({ error: "Username and password are required" });
+    }
+    
+    if (username.length < 3 || username.length > 20) {
+      return res.status(400).json({ error: "Username must be 3-20 characters" });
+    }
+    
+    // Check if username already exists in database
+    if (usernameExists(username)) {
+      return res.status(400).json({ error: "Username already exists" });
+    }
+    
+    // Determine role based on monitor code
+    const role = monitorCode === MONITOR_SECRET_CODE ? "monitor" : "player";
+    
+    const userId = `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    
+    // Save user to database
+    const user = createUser({
+      id: userId,
+      username,
+      password, // In production, hash this!
+      role
+    });
+    
+    // Generate token
+    const token = generateToken(userId);
+    tokens.set(token, userId);
+    
+    console.log(`👤 New ${role} registered: ${username} (saved to SQLite)`);
+    
+    res.json({
+      success: true,
+      token,
+      user: {
+        id: user.id,
+        username: user.username,
+        role: user.role
+      }
+    });
+  } catch (error) {
+    console.error("Registration error:", error);
+    res.status(500).json({ error: "Registration failed" });
+  }
+});
+
+// Login
+app.post("/auth/login", (req, res) => {
+  try {
+    const { username, password } = req.body;
+    
+    if (!username || !password) {
+      return res.status(400).json({ error: "Username and password are required" });
+    }
+    
+    // Find user in database
+    const foundUser = getUserByUsername(username);
+    
+    if (!foundUser || foundUser.password !== password) {
+      return res.status(401).json({ error: "Invalid username or password" });
+    }
+    
+    // Generate token
+    const token = generateToken(foundUser.id);
+    tokens.set(token, foundUser.id);
+    
+    console.log(`🔑 User logged in: ${username} (${foundUser.role})`);
+    
+    res.json({
+      success: true,
+      token,
+      user: {
+        id: foundUser.id,
+        username: foundUser.username,
+        role: foundUser.role
+      }
+    });
+  } catch (error) {
+    console.error("Login error:", error);
+    res.status(500).json({ error: "Login failed" });
+  }
+});
+
+// Verify token middleware
+const verifyToken = (req: any, res: any, next: any) => {
+  const token = req.headers.authorization?.replace("Bearer ", "");
+  
+  if (!token || !tokens.has(token)) {
+    return res.status(401).json({ error: "Invalid or missing token" });
+  }
+  
+  const userId = tokens.get(token)!;
+  
+  // Get user from database
+  const user = getUserById(userId);
+  
+  if (!user) {
+    return res.status(401).json({ error: "User not found" });
+  }
+  
+  req.user = user;
+  next();
+};
+
+// Get current user
+app.get("/auth/me", verifyToken, (req: any, res) => {
+  res.json({
+    user: {
+      id: req.user.id,
+      username: req.user.username,
+      role: req.user.role
+    }
+  });
+});
+
+// ========== PLAYER QUEUE ENDPOINTS ==========
+
+// Player joins waiting queue
+app.post("/queue/join", verifyToken, (req: any, res) => {
+  if (req.user.role !== "player") {
+    return res.status(403).json({ error: "Only players can join the queue" });
+  }
+  
+  waitingPlayers.set(req.user.id, {
+    oduderId: req.user.id,
+    username: req.user.username,
+    joinedAt: new Date()
+  });
+  
+  console.log(`📋 Player joined queue: ${req.user.username}`);
+  
+  res.json({ success: true, message: "Added to waiting queue" });
+});
+
+// Player leaves waiting queue
+app.post("/queue/leave", verifyToken, (req: any, res) => {
+  waitingPlayers.delete(req.user.id);
+  console.log(`📋 Player left queue: ${req.user.username}`);
+  res.json({ success: true });
+});
+
+// Get waiting players (for monitors)
+app.get("/queue/players", verifyToken, (req: any, res) => {
+  if (req.user.role !== "monitor") {
+    return res.status(403).json({ error: "Only monitors can view the queue" });
+  }
+  
+  const players = Array.from(waitingPlayers.values()).map(p => ({
+    oduderId: p.oduderId,
+    username: p.username,
+    waitingTime: Date.now() - p.joinedAt.getTime()
+  }));
+  
+  res.json({ players });
+});
+
+// Get room ID by room code (for spectating)
+app.get("/room/by-code/:code", (req, res) => {
+  const { code } = req.params;
+  
+  for (const [roomId, roomInfo] of activeRooms.entries()) {
+    if (roomInfo.code === code) {
+      return res.json({ roomId, code: roomInfo.code });
+    }
+  }
+  
+  res.status(404).json({ error: "Room not found" });
+});
+
+// ========== MONITOR ENDPOINTS ==========
+
+// Create a room and assign players (monitor only) - combined into one action
+app.post("/monitor/create-room", verifyToken, async (req: any, res) => {
+  if (req.user.role !== "monitor") {
+    return res.status(403).json({ error: "Only monitors can create rooms" });
+  }
+  
+  try {
+    // Create a Colyseus room using matchMaker
+    const room = await matchMaker.createRoom("game_room", {});
+    
+    console.log(`🎮 Monitor ${req.user.username} created room: ${room.roomId}`);
+    
+    // Get the room code from the room state if available
+    const roomInstance = matchMaker.getRoomById(room.roomId);
+    const roomCode = (roomInstance as any)?.roomCode || room.roomId.substring(0, 6).toUpperCase();
+    
+    res.json({ 
+      success: true, 
+      roomId: room.roomId,
+      roomCode,
+      message: "Room created. Assign players to this room."
+    });
+  } catch (error) {
+    console.error("Error creating room:", error);
+    res.status(500).json({ error: "Failed to create room" });
+  }
+});
+
+// Assign players to an existing room (monitor only)
+app.post("/monitor/assign-players", verifyToken, (req: any, res) => {
+  if (req.user.role !== "monitor") {
+    return res.status(403).json({ error: "Only monitors can assign players" });
+  }
+  
+  const { playerIds, roomId } = req.body;
+  
+  if (!playerIds || !Array.isArray(playerIds) || playerIds.length !== 2) {
+    return res.status(400).json({ error: "Must assign exactly 2 players" });
+  }
+  
+  if (!roomId) {
+    return res.status(400).json({ error: "roomId is required" });
+  }
+  
+  // Remove players from waiting queue
+  for (const oduderId of playerIds) {
+    waitingPlayers.delete(oduderId);
+  }
+  
+  // Store assignment info with the actual roomId
+  (global as any).pendingAssignments = (global as any).pendingAssignments || new Map();
+  (global as any).pendingAssignments.set(roomId, {
+    playerIds,
+    roomId,
+    monitorId: req.user.id,
+    createdAt: Date.now()
+  });
+  
+  console.log(`🎮 Monitor ${req.user.username} assigned players to room ${roomId}`);
+  
+  res.json({ 
+    success: true, 
+    roomId,
+    assignedPlayers: playerIds
+  });
+});
+
+// Get all active rooms (monitor only)
+app.get("/monitor/rooms", verifyToken, (req: any, res) => {
+  if (req.user.role !== "monitor") {
+    return res.status(403).json({ error: "Only monitors can view all rooms" });
+  }
+  
+  const rooms = Array.from(activeRooms.values()).map(room => ({
+    roomId: room.roomId,
+    code: room.code,
+    players: room.players,
+    maxPlayers: 2
+  }));
+  
+  res.json({ rooms });
+});
+
+// Check player's assignment status
+app.get("/queue/status", verifyToken, (req: any, res) => {
+  const pendingAssignments = (global as any).pendingAssignments || new Map();
+  
+  // Check if player is assigned to any room
+  for (const [roomId, assignment] of pendingAssignments.entries()) {
+    if (assignment.playerIds.includes(req.user.id)) {
+      return res.json({
+        status: "assigned",
+        roomId: assignment.roomId || roomId
+      });
+    }
+  }
+  
+  // Check if player is in queue
+  if (waitingPlayers.has(req.user.id)) {
+    return res.json({
+      status: "waiting",
+      position: Array.from(waitingPlayers.keys()).indexOf(req.user.id) + 1
+    });
+  }
+  
+  res.json({ status: "none" });
+});
+
+// ========== MINIGAME ENDPOINTS ==========
+
+// Start a minigame session (called when driver hits a cone)
+app.post("/minigame/start", (req, res) => {
+  const { roomCode } = req.body;
+  
+  if (!roomCode) {
+    return res.status(400).json({ error: "roomCode is required" });
+  }
+  
+  // Generate unique session ID
+  const sessionId = `mg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  
+  const session: MinigameSession = {
+    sessionId,
+    roomCode,
+    startTime: Date.now(),
+    result: "pending"
+  };
+  
+  minigameSessions.set(sessionId, session);
+  
+  console.log(`🎮 Minigame session started: ${sessionId} for room ${roomCode}`);
+  
+  res.json({ 
+    sessionId,
+    minigameUrl: `/minigame?session=${sessionId}` // URL que el minijuego usará
+  });
+});
+
+// Receive result from minigame service (external service will call this)
+app.post("/minigame/result", (req, res) => {
+  const { sessionId, won, roomCode } = req.body;
+  
+  // Can use sessionId OR roomCode to identify the game
+  let targetRoomCode = roomCode;
+  
+  if (sessionId) {
+    const session = minigameSessions.get(sessionId);
+    if (session) {
+      targetRoomCode = session.roomCode;
+      session.result = won ? "won" : "lost";
+    }
+  }
+  
+  if (!targetRoomCode) {
+    return res.status(400).json({ error: "roomCode or valid sessionId is required" });
+  }
+  
+  // Find the room and resolve the minigame
+  const room = roomsByCode.get(targetRoomCode);
+  if (room && room.resolveMinigame) {
+    room.resolveMinigame(won === true);
+    console.log(`🎮 Minigame result received for room ${targetRoomCode}: ${won ? 'WON' : 'LOST'}`);
+    res.json({ success: true, result: won ? "won" : "lost" });
+  } else {
+    console.log(`⚠️ Room not found for code: ${targetRoomCode}`);
+    res.status(404).json({ error: "Room not found" });
+  }
+});
+
+// Check minigame status (for polling from client)
+app.get("/minigame/status/:sessionId", (req, res) => {
+  const { sessionId } = req.params;
+  
+  const session = minigameSessions.get(sessionId);
+  if (!session) {
+    return res.status(404).json({ error: "Session not found" });
+  }
+  
+  res.json({
+    sessionId: session.sessionId,
+    roomCode: session.roomCode,
+    result: session.result,
+    elapsed: Date.now() - session.startTime
+  });
+});
+
+// Clean up old sessions (older than 5 minutes)
+setInterval(() => {
+  const now = Date.now();
+  for (const [sessionId, session] of minigameSessions.entries()) {
+    if (now - session.startTime > 5 * 60 * 1000) {
+      minigameSessions.delete(sessionId);
+      console.log(`🗑️ Cleaned up old minigame session: ${sessionId}`);
+    }
+  }
+}, 60000); // Run every minute
 
 // Get local network IP address
 function getLocalIPAddress(): string {
@@ -71,14 +491,27 @@ function getLocalIPAddress(): string {
 
 const localIP = getLocalIPAddress();
 
-// Listen on all network interfaces (0.0.0.0)
-// The HTTP server needs to listen, and Colyseus is already attached to it
-server.listen(port, '0.0.0.0', () => {
-  console.log(`\n🚀 Server is running!`);
-  console.log(`📡 Local network access:`);
-  console.log(`   ws://${localIP}:${port}`);
-  console.log(`   http://${localIP}:${port}`);
-  console.log(`\n💻 Local access:`);
-  console.log(`   ws://localhost:${port}`);
-  console.log(`   http://localhost:${port}\n`);
-});
+// Initialize database and start server
+function startServer() {
+  try {
+    // Initialize database tables
+    initDatabase();
+    
+    // Listen on all network interfaces (0.0.0.0)
+    server.listen(port, '0.0.0.0', () => {
+      console.log(`\n🚀 Server is running!`);
+      console.log(`📡 Local network access:`);
+      console.log(`   ws://${localIP}:${port}`);
+      console.log(`   http://${localIP}:${port}`);
+      console.log(`\n💻 Local access:`);
+      console.log(`   ws://localhost:${port}`);
+      console.log(`   http://localhost:${port}\n`);
+      console.log(`💾 Database: SQLite (local)`);
+    });
+  } catch (error) {
+    console.error("❌ Failed to start server:", error);
+    process.exit(1);
+  }
+}
+
+startServer();

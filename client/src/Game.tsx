@@ -1,6 +1,6 @@
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import * as Colyseus from "colyseus.js";
-import { GameState, Trap } from "./schema/GameState";
+import { GameState } from "./schema/GameState";
 import { DrawingCanvas } from "./components/DrawingCanvas";
 import { AudioSystem } from "./components/AudioSystem";
 import { Lobby } from "./components/Lobby";
@@ -30,7 +30,11 @@ const getServerURL = () => {
 
 const client = new Colyseus.Client(getServerURL());
 
-export const Game = () => {
+interface GameProps {
+    preassignedRoom?: string; // Room code assigned by monitor
+}
+
+export const Game = ({ preassignedRoom }: GameProps) => {
     const [room, setRoom] = useState<Colyseus.Room<GameState> | null>(null);
     const [connected, setConnected] = useState(false);
     const [myRole, setMyRole] = useState<string>("");
@@ -38,20 +42,81 @@ export const Game = () => {
     const [carPosition, setCarPosition] = useState<{ x: number, z: number, angle: number }>({ x: 0, z: 0, angle: 0 });
     const [carSpeed, setCarSpeed] = useState(0);
     const [steeringValue, setSteeringValue] = useState(0);
-    const [traps, setTraps] = useState<Trap[]>([]);
+    type TrapDTO = { id: string; x: number; z: number; type: string; radius: number };
+    const [traps, setTraps] = useState<TrapDTO[]>([]);
     const [gamePhase, setGamePhase] = useState<string>("lobby");
     const [challenge, setChallenge] = useState<any>(null);
     const [challengePortal, setChallengePortal] = useState<{ x: number, z: number, active: boolean }>({ x: 0, z: 0, active: false });
     const [carState, setCarState] = useState<any>({});
     const [radioStation, setRadioStation] = useState("normal");
     const [hornActive, setHornActive] = useState(false);
+    const [bgmEnabled, setBgmEnabled] = useState(true); // BGM toggle (synced from server)
     const [roomCode, setRoomCode] = useState("");
     const [pathHistory, setPathHistory] = useState<Array<{ x: number; z: number }>>([]);
     const [startPoint, setStartPoint] = useState({ x: 0, z: 0 });
     const [endPoint, setEndPoint] = useState({ x: 100, z: 100 });
+    const [trackData, setTrackData] = useState<string>("");
+    const [conesData, setConesData] = useState<string>("");
     const audioSystemRef = useRef<any>(null);
+    
+    // Race state
+    const [currentLap, setCurrentLap] = useState(0);
+    const [totalLaps, setTotalLaps] = useState(1);
+    const [raceProgress, setRaceProgress] = useState(0);
+    const [raceFinished, setRaceFinished] = useState(false);
+    const [raceTime, setRaceTime] = useState(0);
+    
+    // Minigame state
+    const [minigameActive, setMinigameActive] = useState(false);
+    const [minigameSessionId, setMinigameSessionId] = useState("");
+    const [minigameResult, setMinigameResult] = useState("");
+    const [clarityActive, setClarityActive] = useState(false);
+    const [speedBoostActive, setSpeedBoostActive] = useState(false);
+    const minigameWindowRef = useRef<Window | null>(null);
+    const minigamePollingRef = useRef<NodeJS.Timeout | null>(null);
+
+    // If role hasn't arrived yet (common right after creating the room), poll briefly to avoid rendering "nothing".
+    useEffect(() => {
+        if (!room || !connected || myRole) return;
+        const interval = setInterval(() => {
+            try {
+                const state = room.state;
+                let role = "";
+                if (state?.players && (state.players as any).forEach) {
+                    (state.players as any).forEach((player: any, key: string) => {
+                        if (key === room.sessionId || player?.sessionId === room.sessionId) {
+                            if (player?.role) role = player.role;
+                        }
+                    });
+                }
+                if (role) {
+                    setMyRole(role);
+                    clearInterval(interval);
+                }
+            } catch {
+                // ignore and keep polling briefly
+            }
+        }, 200);
+        return () => clearInterval(interval);
+    }, [room, connected, myRole]);
+
+    // Handle minigame - open window for BOTH players (cooperative minigame)
+    useEffect(() => {
+        if (minigameActive && minigameSessionId && myRole) {
+            // Open minigame in new tab for BOTH driver and navigator
+            const minigameUrl = `/minigame.html?session=${minigameSessionId}&room=${roomCode}&role=${myRole}`;
+            if (!minigameWindowRef.current || minigameWindowRef.current.closed) {
+                console.log(`Opening minigame for ${myRole}:`, minigameUrl);
+                minigameWindowRef.current = window.open(minigameUrl, '_blank');
+            }
+        }
+        // Window will close itself when minigame ends
+    }, [minigameActive, minigameSessionId, myRole, roomCode]);
 
     const setupRoomListeners = useCallback((r: Colyseus.Room<GameState>) => {
+        // Ensure we always store the session id we should look up in state.players
+        setMySessionId(r.sessionId);
+
         // Set initial state immediately if available
         const updateState = (state: GameState) => {
             if (!state) {
@@ -59,7 +124,7 @@ export const Game = () => {
                 return;
             }
             
-            console.log("Updating state:", state.gamePhase, "roomCode:", state.roomCode);
+            console.log("📊 Updating state:", state.gamePhase, "roomCode:", state.roomCode, "trackData:", state.trackData?.length || 0, "chars");
             setGamePhase(state.gamePhase || "lobby");
             setRoomCode(state.roomCode || "");
             
@@ -71,12 +136,26 @@ export const Game = () => {
                 setEndPoint({ x: state.endX, z: state.endZ });
             }
             
-            // Safely access players
-            if (state.players && state.players.get) {
-                const me = state.players.get(r.sessionId);
-                if (me) {
-                    setMyRole(me.role);
+            // Determine my role robustly (MapSchema key lookup + value scan fallback)
+            let role = "";
+            try {
+                if (state.players && (state.players as any).get) {
+                    const me = (state.players as any).get(r.sessionId);
+                    if (me?.role) role = me.role;
                 }
+            } catch {
+                // ignore - we'll try scanning below
+            }
+            if (!role && state.players && (state.players as any).forEach) {
+                (state.players as any).forEach((player: any, key: string) => {
+                    if (key === r.sessionId || player?.sessionId === r.sessionId) {
+                        if (player?.role) role = player.role;
+                    }
+                });
+            }
+            if (role) {
+                console.log("👤 My role detected:", role);
+                setMyRole(role);
             }
             
             const newPosition = {
@@ -102,7 +181,7 @@ export const Game = () => {
 
             // Safely access traps
             if (state.traps && state.traps.forEach) {
-                const trapArray: Trap[] = [];
+                const trapArray: TrapDTO[] = [];
                 state.traps.forEach((trap, key) => {
                     trapArray.push({
                         id: key,
@@ -131,6 +210,32 @@ export const Game = () => {
 
             setRadioStation(state.radioStation || "normal");
             setHornActive(state.hornActive || false);
+            setBgmEnabled(state.bgmEnabled !== undefined ? state.bgmEnabled : true);
+            setTrackData(state.trackData || "");
+            setConesData(state.conesData || "");
+            
+            // Race state
+            setCurrentLap(state.currentLap || 0);
+            setTotalLaps(state.totalLaps || 1);
+            setRaceProgress(state.raceProgress || 0);
+            setRaceFinished(state.raceFinished || false);
+            setRaceTime(state.raceTime || 0);
+            
+            // Minigame state
+            setMinigameActive(state.minigameActive || false);
+            setMinigameSessionId(state.minigameSessionId || "");
+            setMinigameResult(state.minigameResult || "");
+            
+            const newClarityActive = state.car?.clarityActive || false;
+            const newSpeedBoostActive = state.car?.speedBoostActive || false;
+            
+            // Debug logging
+            if (newClarityActive || newSpeedBoostActive) {
+                console.log(`🎮 Rewards received! clarity=${newClarityActive}, speedBoost=${newSpeedBoostActive}`);
+            }
+            
+            setClarityActive(newClarityActive);
+            setSpeedBoostActive(newSpeedBoostActive);
         };
 
         // Set initial state
@@ -202,14 +307,15 @@ export const Game = () => {
 
     const handleJoinRoom = useCallback(async (roomId: string) => {
         try {
+            console.log("🔗 Attempting to join room:", roomId);
             const r = await client.joinById<GameState>(roomId);
-            console.log("Joined room", r.sessionId);
+            console.log("✅ Joined room", r.sessionId, "State:", r.state?.gamePhase, "Track:", r.state?.trackData?.length);
             setRoom(r);
             setMySessionId(r.sessionId);
             setConnected(true);
             setupRoomListeners(r);
         } catch (e) {
-            console.error("Join room error", e);
+            console.error("❌ Join room error", e);
             const errorMessage = e instanceof Error 
                 ? e.message 
                 : typeof e === 'string' 
@@ -218,6 +324,22 @@ export const Game = () => {
             alert("Failed to join room: " + errorMessage);
         }
     }, [setupRoomListeners]);
+
+    // Guard to prevent double joining
+    const joiningRef = useRef(false);
+    
+    // Auto-join preassigned room if provided (from monitor assignment)
+    useEffect(() => {
+        if (preassignedRoom && !room && !connected && !joiningRef.current) {
+            joiningRef.current = true;
+            console.log("🎮 Auto-joining preassigned room:", preassignedRoom);
+            // Join the existing room by its ID (preassignedRoom is the roomId, not code)
+            handleJoinRoom(preassignedRoom).finally(() => {
+                // Reset guard after join completes (success or failure)
+                setTimeout(() => { joiningRef.current = false; }, 1000);
+            });
+        }
+    }, [preassignedRoom, room, connected, handleJoinRoom]);
 
     const handleSteer = useCallback((value: number) => {
         if (room) {
@@ -249,6 +371,13 @@ export const Game = () => {
         }
     }, [room, radioStation]);
 
+    const handleBgmToggle = useCallback(() => {
+        if (room && myRole === "navigator") {
+            // Send toggle to server (only navigator can control)
+            room.send("bgm_toggle", { enabled: !bgmEnabled });
+        }
+    }, [room, myRole, bgmEnabled]);
+
     const handleDrawingComplete = useCallback((canvasData: string) => {
         if (room && challenge && challenge.currentDrawer === mySessionId) {
             room.send("drawing", { canvasData });
@@ -261,14 +390,62 @@ export const Game = () => {
         }
     }, [room, challenge, mySessionId]);
 
-    // Show main lobby if not connected
+    const handleTrackGenerated = useCallback((track: Array<{x: number, y: number}>) => {
+        if (room) {
+            const trackJson = JSON.stringify(track);
+            room.send("track", { trackData: trackJson });
+        }
+    }, [room]);
+
+    // Handler para cuando el Driver genera los conos/obstáculos
+    const handleConesGenerated = useCallback((cones: Array<{x: number, y: number}>) => {
+        if (room) {
+            console.log("Sending cones to server:", cones.length);
+            const conesJson = JSON.stringify(cones);
+            room.send("cones", { conesData: conesJson });
+        }
+    }, [room]);
+
+    // Show main lobby if not connected (only if NOT coming from monitor assignment)
     if (!connected) {
+        // If we have a preassigned room, show connecting screen instead of lobby
+        if (preassignedRoom) {
+            return (
+                <div style={{
+                    minHeight: '100vh',
+                    background: '#0a0a0f',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontFamily: '"Press Start 2P", monospace',
+                    color: '#fff'
+                }}>
+                    <div style={{ textAlign: 'center' }}>
+                        <div style={{ fontSize: '48px', marginBottom: '20px' }}>🏎️</div>
+                        <div style={{ fontSize: '14px', color: '#ffd700', marginBottom: '10px' }}>
+                            CONECTANDO A PARTIDA...
+                        </div>
+                        <div style={{
+                            width: '60px',
+                            height: '60px',
+                            border: '4px solid #e94560',
+                            borderTop: '4px solid transparent',
+                            borderRadius: '50%',
+                            margin: '20px auto',
+                            animation: 'spin 1s linear infinite'
+                        }} />
+                        <style>{`
+                            @keyframes spin {
+                                0% { transform: rotate(0deg); }
+                                100% { transform: rotate(360deg); }
+                            }
+                        `}</style>
+                    </div>
+                </div>
+            );
+        }
         return (
-            <Lobby
-                client={client}
-                onJoinRoom={handleJoinRoom}
-                onCreateRoom={handleCreateRoom}
-            />
+            <Lobby onJoinRoom={handleJoinRoom} onCreateRoom={handleCreateRoom} />
         );
     }
     
@@ -298,7 +475,7 @@ export const Game = () => {
                         )}
                     </div>
                     <div className="lobby-section">
-                        <div className="section-header">PLAYERS: {playerCount}/4</div>
+                        <div className="section-header">PLAYERS: {playerCount}/2</div>
                         {playerCount >= 2 && (
                             <button
                                 className="pixel-button large"
@@ -329,6 +506,15 @@ export const Game = () => {
     const showDrawing1 = challenge?.phase === "drawing2" || challenge?.phase === "guessing";
     const showDrawing2 = challenge?.phase === "guessing";
 
+    // Format time as MM:SS.ms
+    const formatTime = (ms: number) => {
+        const totalSeconds = Math.floor(ms / 1000);
+        const minutes = Math.floor(totalSeconds / 60);
+        const seconds = totalSeconds % 60;
+        const milliseconds = Math.floor((ms % 1000) / 10);
+        return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}.${milliseconds.toString().padStart(2, '0')}`;
+    };
+
     return (
         <div className="game-container">
             <AudioSystem 
@@ -336,7 +522,358 @@ export const Game = () => {
                 hornActive={hornActive}
                 radioStation={radioStation}
                 turboActive={carState.turboActive}
+                bgmEnabled={bgmEnabled}
             />
+
+            {/* Race HUD - Pixel Art Style */}
+            {gamePhase === "playing" && (
+                <div style={{
+                    position: 'fixed',
+                    top: '16px',
+                    left: '50%',
+                    transform: 'translateX(-50%)',
+                    zIndex: 1000,
+                    display: 'flex',
+                    gap: '4px',
+                    padding: '8px',
+                    background: '#1a1a2e',
+                    border: '4px solid #16213e',
+                    boxShadow: '4px 4px 0px #0f0f23, inset 0 0 0 2px #2a2a4e',
+                    imageRendering: 'pixelated',
+                    fontFamily: '"Press Start 2P", "Courier New", monospace',
+                }}>
+                    {/* LAP */}
+                    <div style={{
+                        background: '#0f3460',
+                        border: '2px solid #16213e',
+                        padding: '8px 16px',
+                        textAlign: 'center'
+                    }}>
+                        <div style={{ fontSize: '8px', color: '#7f8c8d', marginBottom: '4px', letterSpacing: '1px' }}>LAP</div>
+                        <div style={{ fontSize: '16px', color: '#e94560', textShadow: '2px 2px 0px #1a1a2e' }}>
+                            {currentLap}/{totalLaps}
+                        </div>
+                    </div>
+                    {/* TIME */}
+                    <div style={{
+                        background: '#0f3460',
+                        border: '2px solid #16213e',
+                        padding: '8px 16px',
+                        textAlign: 'center'
+                    }}>
+                        <div style={{ fontSize: '8px', color: '#7f8c8d', marginBottom: '4px', letterSpacing: '1px' }}>TIME</div>
+                        <div style={{ fontSize: '16px', color: '#00ff88', textShadow: '2px 2px 0px #1a1a2e' }}>
+                            {formatTime(raceTime)}
+                        </div>
+                    </div>
+                    {/* PROGRESS */}
+                    <div style={{
+                        background: '#0f3460',
+                        border: '2px solid #16213e',
+                        padding: '8px 16px',
+                        textAlign: 'center'
+                    }}>
+                        <div style={{ fontSize: '8px', color: '#7f8c8d', marginBottom: '4px', letterSpacing: '1px' }}>PROG</div>
+                        <div style={{ fontSize: '16px', color: '#00d4ff', textShadow: '2px 2px 0px #1a1a2e' }}>
+                            {Math.round(raceProgress * 100)}%
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* WIN SCREEN - Pixel Art Style */}
+            {raceFinished && (
+                <div style={{
+                    position: 'fixed',
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    zIndex: 2000,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    background: '#0a0a0f',
+                    fontFamily: '"Press Start 2P", "Courier New", monospace',
+                    imageRendering: 'pixelated',
+                }}>
+                    {/* Pixel border frame */}
+                    <div style={{
+                        background: '#1a1a2e',
+                        border: '8px solid #16213e',
+                        boxShadow: '8px 8px 0px #0f0f23, inset 0 0 0 4px #2a2a4e',
+                        padding: '48px 64px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                    }}>
+                        {/* Trophy */}
+                        <div style={{
+                            fontSize: '48px',
+                            marginBottom: '16px',
+                            animation: 'bounce 0.5s ease-in-out infinite alternate',
+                        }}>
+                            🏆
+                        </div>
+                        
+                        {/* VICTORY text */}
+                        <div style={{
+                            fontSize: '32px',
+                            color: '#ffd700',
+                            textShadow: '4px 4px 0px #b8860b, -2px -2px 0px #ffec8b',
+                            marginBottom: '24px',
+                            letterSpacing: '4px',
+                        }}>
+                            VICTORY!
+                        </div>
+                        
+                        {/* Separator line */}
+                        <div style={{
+                            width: '200px',
+                            height: '4px',
+                            background: 'linear-gradient(90deg, transparent, #e94560, transparent)',
+                            marginBottom: '24px',
+                        }} />
+                        
+                        {/* Time label */}
+                        <div style={{
+                            fontSize: '10px',
+                            color: '#7f8c8d',
+                            marginBottom: '8px',
+                            letterSpacing: '2px',
+                        }}>
+                            FINAL TIME
+                        </div>
+                        
+                        {/* Time value */}
+                        <div style={{
+                            fontSize: '24px',
+                            color: '#00ff88',
+                            textShadow: '3px 3px 0px #1a1a2e',
+                            marginBottom: '24px',
+                        }}>
+                            {formatTime(raceTime)}
+                        </div>
+                        
+                        {/* Laps completed */}
+                        <div style={{
+                            fontSize: '10px',
+                            color: '#00d4ff',
+                            marginBottom: '32px',
+                            letterSpacing: '1px',
+                        }}>
+                            {totalLaps} LAP{totalLaps > 1 ? 'S' : ''} COMPLETE
+                        </div>
+                        
+                        {/* Play Again button - Pixel style */}
+                        <button
+                            onClick={() => {
+                                if (room) {
+                                    room.leave();
+                                }
+                                // Reload page to go back to lobby
+                                window.location.reload();
+                            }}
+                            style={{
+                                padding: '16px 32px',
+                                fontSize: '12px',
+                                fontFamily: '"Press Start 2P", "Courier New", monospace',
+                                background: '#0f3460',
+                                color: '#fff',
+                                border: '4px solid #16213e',
+                                boxShadow: '4px 4px 0px #0f0f23',
+                                cursor: 'pointer',
+                                letterSpacing: '2px',
+                                transition: 'transform 0.1s',
+                            }}
+                            onMouseOver={(e) => {
+                                e.currentTarget.style.transform = 'translate(2px, 2px)';
+                                e.currentTarget.style.boxShadow = '2px 2px 0px #0f0f23';
+                            }}
+                            onMouseOut={(e) => {
+                                e.currentTarget.style.transform = 'translate(0, 0)';
+                                e.currentTarget.style.boxShadow = '4px 4px 0px #0f0f23';
+                            }}
+                        >
+                            VOLVER AL LOBBY
+                        </button>
+                    </div>
+                    
+                    {/* Decorative pixels in corners */}
+                    <div style={{
+                        position: 'absolute',
+                        top: '20px',
+                        left: '20px',
+                        width: '8px',
+                        height: '8px',
+                        background: '#e94560',
+                        boxShadow: '12px 0 0 #00ff88, 24px 0 0 #00d4ff, 0 12px 0 #ffd700',
+                    }} />
+                    <div style={{
+                        position: 'absolute',
+                        top: '20px',
+                        right: '20px',
+                        width: '8px',
+                        height: '8px',
+                        background: '#00d4ff',
+                        boxShadow: '-12px 0 0 #00ff88, -24px 0 0 #e94560, 0 12px 0 #ffd700',
+                    }} />
+                    <div style={{
+                        position: 'absolute',
+                        bottom: '20px',
+                        left: '20px',
+                        width: '8px',
+                        height: '8px',
+                        background: '#ffd700',
+                        boxShadow: '12px 0 0 #e94560, 24px 0 0 #00ff88, 0 -12px 0 #00d4ff',
+                    }} />
+                    <div style={{
+                        position: 'absolute',
+                        bottom: '20px',
+                        right: '20px',
+                        width: '8px',
+                        height: '8px',
+                        background: '#00ff88',
+                        boxShadow: '-12px 0 0 #ffd700, -24px 0 0 #00d4ff, 0 -12px 0 #e94560',
+                    }} />
+                </div>
+            )}
+
+            {/* MINIGAME OVERLAY - shown when minigame is active (for BOTH players) */}
+            {minigameActive && myRole && (
+                <div style={{
+                    position: 'fixed',
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    zIndex: 1500,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    background: 'rgba(0, 0, 0, 0.85)',
+                    fontFamily: '"Press Start 2P", "Courier New", monospace',
+                }}>
+                    <div style={{
+                        background: '#1a1a2e',
+                        border: '8px solid #e94560',
+                        boxShadow: '8px 8px 0px #0f0f23',
+                        padding: '40px 60px',
+                        textAlign: 'center',
+                    }}>
+                        {minigameResult === "pending" || !minigameResult ? (
+                            <>
+                                <div style={{ fontSize: '16px', color: '#ffd700', marginBottom: '20px' }}>
+                                    ⚠️ ¡CONO GOLPEADO! ⚠️
+                                </div>
+                                <div style={{ fontSize: '24px', color: '#fff', marginBottom: '20px' }}>
+                                    MINIJUEGO
+                                </div>
+                                <div style={{ fontSize: '10px', color: '#888', marginBottom: '30px' }}>
+                                    Espera el resultado...
+                                </div>
+                                <div style={{
+                                    width: '40px',
+                                    height: '40px',
+                                    border: '4px solid #e94560',
+                                    borderTop: '4px solid transparent',
+                                    borderRadius: '50%',
+                                    margin: '0 auto',
+                                    animation: 'spin 1s linear infinite',
+                                }} />
+                            </>
+                        ) : minigameResult === "won" ? (
+                            <>
+                                <div style={{ fontSize: '48px', marginBottom: '20px' }}>🏆</div>
+                                <div style={{ fontSize: '24px', color: '#00ff88', marginBottom: '20px' }}>
+                                    ¡GANASTE!
+                                </div>
+                                <div style={{ fontSize: '10px', color: '#888', marginBottom: '20px' }}>
+                                    +8s Claridad | +8s Velocidad +20%
+                                </div>
+                                <div style={{ fontSize: '12px', color: '#ffd700', marginTop: '20px' }}>
+                                    🚗 Reposicionando... 3s
+                                </div>
+                            </>
+                        ) : (
+                            <>
+                                <div style={{ fontSize: '48px', marginBottom: '20px' }}>❌</div>
+                                <div style={{ fontSize: '24px', color: '#e94560', marginBottom: '20px' }}>
+                                    PERDISTE
+                                </div>
+                                <div style={{ fontSize: '10px', color: '#888', marginBottom: '20px' }}>
+                                    Sin recompensas
+                                </div>
+                                <div style={{ fontSize: '12px', color: '#ffd700', marginTop: '20px' }}>
+                                    🚗 Reposicionando... 3s
+                                </div>
+                            </>
+                        )}
+                        <style>{`
+                            @keyframes spin {
+                                0% { transform: rotate(0deg); }
+                                100% { transform: rotate(360deg); }
+                            }
+                        `}</style>
+                    </div>
+                </div>
+            )}
+
+            {/* REWARD INDICATORS - shown when rewards are active */}
+            {(clarityActive || speedBoostActive) && (
+                <div style={{
+                    position: 'fixed',
+                    top: '80px',
+                    left: '50%',
+                    transform: 'translateX(-50%)',
+                    zIndex: 1100,
+                    display: 'flex',
+                    gap: '10px',
+                    fontFamily: '"Press Start 2P", "Courier New", monospace',
+                }}>
+                    {clarityActive && (
+                        <div style={{
+                            background: '#00ff88',
+                            color: '#000',
+                            padding: '8px 16px',
+                            fontSize: '10px',
+                            border: '3px solid #000',
+                            boxShadow: '3px 3px 0px #0f0f23',
+                            animation: 'pulse 0.5s ease-in-out infinite',
+                        }}>
+                            👁️ CLARIDAD
+                        </div>
+                    )}
+                    {speedBoostActive && (
+                        <div style={{
+                            background: '#ffd700',
+                            color: '#000',
+                            padding: '8px 16px',
+                            fontSize: '10px',
+                            border: '3px solid #000',
+                            boxShadow: '3px 3px 0px #0f0f23',
+                            animation: 'pulse 0.5s ease-in-out infinite',
+                        }}>
+                            🚀 +20% VELOCIDAD
+                        </div>
+                    )}
+                    <style>{`
+                        @keyframes pulse {
+                            0%, 100% { opacity: 1; }
+                            50% { opacity: 0.7; }
+                        }
+                    `}</style>
+                </div>
+            )}
+
+            {/* If role is still loading, show a small status instead of a blank screen */}
+            {!myRole && (
+                <div style={{ color: "#fff", fontFamily: "monospace", padding: "16px" }}>
+                    Loading role… (session: {mySessionId || room?.sessionId})
+                </div>
+            )}
 
             {/* Role-specific views */}
             {myRole === "driver" && (
@@ -344,6 +881,13 @@ export const Game = () => {
                     steeringValue={steeringValue}
                     onSteer={handleSteer}
                     onAccelerate={handleAccelerate}
+                    onCollision={() => {
+                        // Send cone_hit to trigger minigame
+                        if (room && !minigameActive) {
+                            console.log("🎯 Sending cone_hit to server!");
+                            room.send("cone_hit");
+                        }
+                    }}
                     controlsInverted={carState.controlsInverted}
                     speed={carSpeed}
                     turboActive={carState.turboActive}
@@ -351,6 +895,11 @@ export const Game = () => {
                     traps={traps}
                     startPoint={startPoint}
                     endPoint={endPoint}
+                    onTrackGenerated={handleTrackGenerated}
+                    onConesGenerated={handleConesGenerated}
+                    trackData={trackData}
+                    clarityActive={clarityActive}
+                    minigameActive={minigameActive}
                 />
             )}
 
@@ -367,6 +916,10 @@ export const Game = () => {
                     radioStation={radioStation}
                     hornActive={hornActive}
                     speed={carSpeed}
+                    trackData={trackData}
+                    conesData={conesData}
+                    bgmEnabled={bgmEnabled}
+                    onBgmToggle={handleBgmToggle}
                 />
             )}
 

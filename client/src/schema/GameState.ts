@@ -19,6 +19,12 @@ export class Car extends Schema {
     @type("number") controlsInvertedTimeLeft: number = 0;
     @type("boolean") cameraCrazy: boolean = false;
     @type("number") cameraCrazyTimeLeft: number = 0;
+    
+    // Minigame rewards
+    @type("boolean") clarityActive: boolean = false;
+    @type("number") clarityTimeLeft: number = 0;
+    @type("boolean") speedBoostActive: boolean = false;
+    @type("number") speedBoostTimeLeft: number = 0;
 }
 
 export class Trap extends Schema {
@@ -45,13 +51,14 @@ export class GameState extends Schema {
     @type({ map: Player }) players = new MapSchema<Player>();
     @type({ map: Trap }) traps = new MapSchema<Trap>();
     @type(Car) car = new Car();
-    @type("string") gamePhase: string = "lobby";
+    @type("string") gamePhase: string = "lobby"; // lobby, playing, challenge, finished
     @type(Challenge) challenge = new Challenge();
     @type("number") challengePortalX: number = 0;
     @type("number") challengePortalZ: number = 0;
     @type("boolean") challengePortalActive: boolean = false;
     @type("string") radioStation: string = "normal";
     @type("boolean") hornActive: boolean = false;
+    @type("boolean") bgmEnabled: boolean = true;
     @type("string") roomCode: string = "";
     @type("number") pathX: number = 0;
     @type("number") pathZ: number = 0;
@@ -59,4 +66,19 @@ export class GameState extends Schema {
     @type("number") startZ: number = 0;
     @type("number") endX: number = 100;
     @type("number") endZ: number = 100;
+    @type("string") trackData: string = "";
+    @type("string") conesData: string = "";
+    
+    // Race/Lap tracking
+    @type("number") currentLap: number = 0;
+    @type("number") totalLaps: number = 1;
+    @type("number") raceProgress: number = 0;
+    @type("number") lastCheckpoint: number = 0;
+    @type("boolean") raceFinished: boolean = false;
+    @type("number") raceTime: number = 0;
+    
+    // Minigame state
+    @type("boolean") minigameActive: boolean = false;
+    @type("string") minigameSessionId: string = "";
+    @type("string") minigameResult: string = "";
 }

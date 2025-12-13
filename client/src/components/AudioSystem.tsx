@@ -4,141 +4,104 @@ interface AudioSystemProps {
     hornActive: boolean;
     radioStation: string;
     turboActive: boolean;
+    bgmEnabled?: boolean; // New prop for BGM toggle
 }
 
-export const AudioSystem = forwardRef<any, AudioSystemProps>(({ hornActive, radioStation, turboActive }, ref) => {
-    const audioContextRef = useRef<AudioContext | null>(null);
-    const hornOscillatorRef = useRef<OscillatorNode | null>(null);
-    const radioOscillatorRef = useRef<OscillatorNode | null>(null);
+export const AudioSystem = forwardRef<any, AudioSystemProps>(({ hornActive, radioStation, turboActive, bgmEnabled = true }, ref) => {
+    const hornAudioRef = useRef<HTMLAudioElement | null>(null);
+    const bgmAudioRef = useRef<HTMLAudioElement | null>(null);
+    const hornIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
     useImperativeHandle(ref, () => ({
         playHorn: () => {
             playHornSound();
         },
         playTurbo: () => {
-            playTurboSound();
+            // Turbo sound can stay synthetic or be removed
         }
     }));
 
+    // Initialize audio elements
     useEffect(() => {
-        // Initialize Web Audio API
-        try {
-            audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
-        } catch (e) {
-            console.warn("Web Audio API not supported");
-        }
+        // Claxon audio
+        hornAudioRef.current = new Audio('/claxon.mp3');
+        hornAudioRef.current.volume = 0.7;
+        hornAudioRef.current.preload = 'auto';
+
+        // BGM audio
+        bgmAudioRef.current = new Audio('/bgm.mp3');
+        bgmAudioRef.current.volume = 0.5;
+        bgmAudioRef.current.loop = true;
+        bgmAudioRef.current.preload = 'auto';
+
+        return () => {
+            if (hornAudioRef.current) {
+                hornAudioRef.current.pause();
+                hornAudioRef.current = null;
+            }
+            if (bgmAudioRef.current) {
+                bgmAudioRef.current.pause();
+                bgmAudioRef.current = null;
+            }
+            if (hornIntervalRef.current) {
+                clearInterval(hornIntervalRef.current);
+            }
+        };
     }, []);
 
     const playHornSound = () => {
-        if (!audioContextRef.current) return;
-
-        if (hornOscillatorRef.current) {
-            hornOscillatorRef.current.stop();
+        if (hornAudioRef.current) {
+            hornAudioRef.current.currentTime = 0; // Reset to start
+            hornAudioRef.current.play().catch(err => {
+                console.warn('Failed to play horn sound:', err);
+            });
         }
-
-        const ctx = audioContextRef.current;
-        const oscillator = ctx.createOscillator();
-        const gainNode = ctx.createGain();
-
-        oscillator.type = 'square';
-        oscillator.frequency.setValueAtTime(400, ctx.currentTime);
-        gainNode.gain.setValueAtTime(0.3, ctx.currentTime);
-
-        oscillator.connect(gainNode);
-        gainNode.connect(ctx.destination);
-
-        oscillator.start();
-        hornOscillatorRef.current = oscillator;
-
-        // Stop after short duration
-        setTimeout(() => {
-            if (hornOscillatorRef.current) {
-                hornOscillatorRef.current.stop();
-                hornOscillatorRef.current = null;
-            }
-        }, 200);
     };
 
-    const playTurboSound = () => {
-        if (!audioContextRef.current) return;
-
-        const ctx = audioContextRef.current;
-        const oscillator = ctx.createOscillator();
-        const gainNode = ctx.createGain();
-
-        oscillator.type = 'sawtooth';
-        oscillator.frequency.setValueAtTime(200, ctx.currentTime);
-        oscillator.frequency.exponentialRampToValueAtTime(800, ctx.currentTime + 0.5);
-        gainNode.gain.setValueAtTime(0.2, ctx.currentTime);
-        gainNode.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.5);
-
-        oscillator.connect(gainNode);
-        gainNode.connect(ctx.destination);
-
-        oscillator.start();
-        oscillator.stop(ctx.currentTime + 0.5);
-    };
-
-    // Horn effect
+    // Horn effect - play claxon when active
     useEffect(() => {
         if (hornActive) {
             playHornSound();
-            const interval = setInterval(() => {
+            // Repeat claxon sound while active
+            hornIntervalRef.current = setInterval(() => {
                 if (hornActive) {
                     playHornSound();
                 }
-            }, 300);
-            return () => clearInterval(interval);
+            }, 500); // Repeat every 500ms
+            return () => {
+                if (hornIntervalRef.current) {
+                    clearInterval(hornIntervalRef.current);
+                    hornIntervalRef.current = null;
+                }
+            };
+        } else {
+            if (hornIntervalRef.current) {
+                clearInterval(hornIntervalRef.current);
+                hornIntervalRef.current = null;
+            }
         }
     }, [hornActive]);
 
-    // Radio effect
+    // BGM effect - play bgm.mp3 when radio is not "normal" and BGM is enabled
     useEffect(() => {
-        if (!audioContextRef.current) return;
+        if (!bgmAudioRef.current) return;
 
-        if (radioOscillatorRef.current) {
-            radioOscillatorRef.current.stop();
-            radioOscillatorRef.current = null;
+        const shouldPlay = bgmEnabled && radioStation !== "normal";
+
+        if (shouldPlay) {
+            bgmAudioRef.current.play().catch(err => {
+                console.warn('Failed to play BGM:', err);
+            });
+        } else {
+            bgmAudioRef.current.pause();
+            bgmAudioRef.current.currentTime = 0; // Reset to start when paused
         }
+    }, [radioStation, bgmEnabled]);
 
-        if (radioStation === "normal") {
-            return;
-        }
-
-        const ctx = audioContextRef.current;
-        const oscillator = ctx.createOscillator();
-        const gainNode = ctx.createGain();
-
-        if (radioStation === "absurd1") {
-            oscillator.type = 'triangle';
-            oscillator.frequency.setValueAtTime(300, ctx.currentTime);
-            gainNode.gain.setValueAtTime(0.1, ctx.currentTime);
-        } else if (radioStation === "absurd2") {
-            oscillator.type = 'sawtooth';
-            oscillator.frequency.setValueAtTime(150, ctx.currentTime);
-            gainNode.gain.setValueAtTime(0.1, ctx.currentTime);
-        }
-
-        oscillator.connect(gainNode);
-        gainNode.connect(ctx.destination);
-        oscillator.start();
-        radioOscillatorRef.current = oscillator;
-
-        return () => {
-            if (radioOscillatorRef.current) {
-                radioOscillatorRef.current.stop();
-                radioOscillatorRef.current = null;
-            }
-        };
-    }, [radioStation]);
-
-    // Turbo effect
+    // Turbo effect (keep existing synthetic sound or remove)
     useEffect(() => {
-        if (turboActive) {
-            playTurboSound();
-        }
+        // Turbo sound can be added later if needed
     }, [turboActive]);
 
     return null;
 });
-
