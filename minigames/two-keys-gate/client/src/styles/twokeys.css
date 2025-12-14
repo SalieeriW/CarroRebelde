@@ -1,0 +1,1359 @@
+/* Two Keys Gate - Specific Styles */
+/* Based on existing pixel art theme from main project */
+
+@import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+
+/* ============================================
+   CSS VARIABLES (Self-contained)
+   ============================================ */
+:root {
+  --pixel-bg: #1a1a2e;
+  --pixel-dark: #0f0f1e;
+  --pixel-light: #16213e;
+  --pixel-accent: #0f3460;
+  --pixel-yellow: #f9d71c;
+  --pixel-green: #00ff41;
+  --pixel-red: #ff0040;
+  --pixel-blue: #00d9ff;
+  --pixel-purple: #b300ff;
+  --pixel-white: #ffffff;
+  --pixel-black: #000000;
+  --pixel-gray: #808080;
+}
+
+/* Base Styles */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  image-rendering: pixelated;
+  image-rendering: -moz-crisp-edges;
+  image-rendering: crisp-edges;
+}
+
+body {
+  font-family: 'Press Start 2P', cursive;
+  overflow: hidden;
+  background: var(--pixel-dark);
+  color: var(--pixel-white);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+/* Pixel Art Background */
+.pixel-bg {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background:
+    repeating-linear-gradient(
+      0deg,
+      var(--pixel-dark) 0px,
+      var(--pixel-dark) 2px,
+      var(--pixel-bg) 2px,
+      var(--pixel-bg) 4px
+    ),
+    repeating-linear-gradient(
+      90deg,
+      var(--pixel-dark) 0px,
+      var(--pixel-dark) 2px,
+      var(--pixel-bg) 2px,
+      var(--pixel-bg) 4px
+    );
+  z-index: -1;
+  opacity: 0.3;
+}
+
+/* Container */
+.twokeys-container {
+  width: 100vw;
+  height: 100vh;
+  position: relative;
+  background: var(--pixel-dark);
+  overflow: hidden;
+}
+
+/* ============================================
+   COMMON COMPONENTS - Buttons, Inputs, Modals
+   ============================================ */
+
+/* Pixel Lobby Container */
+.pixel-lobby {
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  background: var(--pixel-dark);
+}
+
+.lobby-container {
+  background: var(--pixel-bg);
+  border: 4px solid var(--pixel-white);
+  box-shadow:
+    inset -4px -4px 0px var(--pixel-black),
+    inset 4px 4px 0px var(--pixel-white),
+    8px 8px 0px var(--pixel-black);
+  padding: 30px;
+  max-width: 600px;
+  width: 90%;
+  position: relative;
+  z-index: 10;
+}
+
+.lobby-title {
+  font-size: 24px;
+  text-align: center;
+  margin-bottom: 15px;
+  color: var(--pixel-yellow);
+  text-shadow:
+    3px 3px 0px var(--pixel-black),
+    0 0 10px var(--pixel-yellow);
+  letter-spacing: 2px;
+}
+
+.lobby-subtitle {
+  text-align: center;
+  color: var(--pixel-green);
+  margin-bottom: 30px;
+  font-size: 10px;
+}
+
+.lobby-section {
+  margin: 20px 0;
+  padding: 15px;
+  background: var(--pixel-light);
+  border: 2px solid var(--pixel-white);
+  box-shadow:
+    inset -2px -2px 0px var(--pixel-black),
+    inset 2px 2px 0px var(--pixel-white);
+}
+
+.section-header {
+  font-size: 12px;
+  color: var(--pixel-yellow);
+  margin-bottom: 10px;
+  text-shadow: 2px 2px 0px var(--pixel-black);
+}
+
+/* Pixel Buttons */
+.pixel-button {
+  background: var(--pixel-green);
+  border: 3px solid var(--pixel-white);
+  box-shadow:
+    inset -3px -3px 0px var(--pixel-black),
+    inset 3px 3px 0px var(--pixel-white),
+    4px 4px 0px var(--pixel-black);
+  color: var(--pixel-black);
+  padding: 15px 25px;
+  font-size: 10px;
+  font-family: 'Press Start 2P', cursive;
+  cursor: pointer;
+  transition: all 0.1s;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  border-radius: 0;
+  outline: none;
+}
+
+.pixel-button:hover:not(:disabled) {
+  transform: translate(2px, 2px);
+  box-shadow:
+    inset -3px -3px 0px var(--pixel-black),
+    inset 3px 3px 0px var(--pixel-white),
+    2px 2px 0px var(--pixel-black);
+}
+
+.pixel-button:active:not(:disabled) {
+  transform: translate(4px, 4px);
+  box-shadow:
+    inset -3px -3px 0px var(--pixel-black),
+    inset 3px 3px 0px var(--pixel-white);
+}
+
+.pixel-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  filter: grayscale(0.5);
+}
+
+.pixel-button.large {
+  padding: 20px 40px;
+  font-size: 12px;
+  width: 100%;
+}
+
+/* Pixel Input */
+.pixel-input {
+  background: var(--pixel-light);
+  border: 3px solid var(--pixel-white);
+  box-shadow:
+    inset 2px 2px 0px var(--pixel-black),
+    inset -2px -2px 0px var(--pixel-white);
+  color: var(--pixel-white);
+  padding: 12px 15px;
+  font-size: 12px;
+  font-family: 'Press Start 2P', cursive;
+  outline: none;
+  width: 100%;
+  border-radius: 0;
+  letter-spacing: 2px;
+}
+
+.pixel-input:focus {
+  border-color: var(--pixel-blue);
+  box-shadow:
+    inset 2px 2px 0px var(--pixel-black),
+    inset -2px -2px 0px var(--pixel-blue),
+    0 0 10px var(--pixel-blue);
+}
+
+.code-input-group {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.code-input-group .pixel-input {
+  flex: 1;
+}
+
+/* Pixel Modal/Dialog */
+.pixel-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: rgba(0, 0, 0, 0.8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: fadeIn 0.2s;
+}
+
+.pixel-modal {
+  background: var(--pixel-bg);
+  border: 4px solid var(--pixel-yellow);
+  box-shadow:
+    inset -4px -4px 0px var(--pixel-black),
+    inset 4px 4px 0px var(--pixel-white),
+    8px 8px 0px var(--pixel-black),
+    0 0 20px var(--pixel-yellow);
+  padding: 30px;
+  max-width: 500px;
+  width: 90%;
+  animation: scaleIn 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+}
+
+.pixel-modal-title {
+  font-size: 16px;
+  color: var(--pixel-yellow);
+  text-shadow: 2px 2px 0px var(--pixel-black);
+  margin-bottom: 20px;
+  text-align: center;
+}
+
+.pixel-modal-message {
+  font-size: 10px;
+  color: var(--pixel-white);
+  line-height: 1.8;
+  margin-bottom: 25px;
+  text-align: center;
+}
+
+.pixel-modal-buttons {
+  display: flex;
+  gap: 15px;
+  justify-content: center;
+}
+
+.pixel-modal-buttons .pixel-button {
+  flex: 1;
+}
+
+/* Players List */
+.players-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.player-item {
+  background: var(--pixel-light);
+  border: 3px solid var(--pixel-white);
+  box-shadow:
+    inset -2px -2px 0px var(--pixel-black),
+    inset 2px 2px 0px var(--pixel-white);
+  padding: 15px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.player-role {
+  font-size: 11px;
+  color: var(--pixel-yellow);
+  margin-bottom: 5px;
+}
+
+/* Animations */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes scaleIn {
+  from {
+    transform: scale(0.8);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+@keyframes glow {
+  0%, 100% { box-shadow: 0 0 10px var(--pixel-blue); }
+  50% { box-shadow: 0 0 20px var(--pixel-blue); }
+}
+
+/* Game-specific Animations */
+@keyframes keyRotate {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+@keyframes keyAlign {
+  0% {
+    transform: translateX(-100px) rotate(-45deg);
+    opacity: 0;
+  }
+  50% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(0) rotate(0deg);
+    opacity: 1;
+  }
+}
+
+@keyframes doorOpen {
+  0% {
+    transform: scaleY(1);
+    transform-origin: top;
+  }
+  100% {
+    transform: scaleY(0);
+    transform-origin: top;
+  }
+}
+
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-5px); }
+  75% { transform: translateX(5px); }
+}
+
+@keyframes starAppear {
+  0% {
+    transform: scale(0) rotate(0deg);
+    opacity: 0;
+  }
+  50% {
+    transform: scale(1.2) rotate(180deg);
+  }
+  100% {
+    transform: scale(1) rotate(360deg);
+    opacity: 1;
+  }
+}
+
+/* ============================================
+   LOBBY STYLES
+   ============================================ */
+
+.session-code-display {
+  background: var(--pixel-dark, #0f0f1e);
+  border: 4px solid var(--pixel-yellow, #f9d71c);
+  box-shadow:
+    inset -3px -3px 0px var(--pixel-black, #000),
+    inset 3px 3px 0px var(--pixel-white, #fff),
+    0 0 15px var(--pixel-yellow, #f9d71c);
+  padding: 20px;
+  font-size: 32px;
+  letter-spacing: 8px;
+  text-align: center;
+  color: var(--pixel-yellow, #f9d71c);
+  text-shadow: 3px 3px 0px var(--pixel-black, #000);
+  margin: 15px 0;
+}
+
+.session-code-hint {
+  text-align: center;
+  color: var(--pixel-green, #00ff41);
+  font-size: 9px;
+  margin-top: 10px;
+}
+
+.players-list .player-item {
+  transition: all 0.3s;
+}
+
+.players-list .player-item.ready {
+  background: var(--pixel-dark, #0f0f1e);
+  border-color: var(--pixel-green, #00ff41);
+  box-shadow:
+    inset -2px -2px 0px var(--pixel-black, #000),
+    inset 2px 2px 0px var(--pixel-green, #00ff41),
+    0 0 10px var(--pixel-green, #00ff41);
+}
+
+.player-info {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.player-name {
+  font-size: 9px;
+  color: var(--pixel-white, #fff);
+}
+
+.player-status {
+  color: var(--pixel-green, #00ff41);
+  font-size: 10px;
+}
+
+.waiting-message {
+  text-align: center;
+  color: var(--pixel-blue, #00d9ff);
+  font-size: 12px;
+  padding: 20px;
+  animation: pulse 2s infinite;
+}
+
+.instructions {
+  background: var(--pixel-light, #16213e);
+  border: 2px solid var(--pixel-white, #fff);
+  padding: 15px;
+  line-height: 1.8;
+}
+
+.instructions p {
+  margin: 8px 0;
+  font-size: 9px;
+  color: var(--pixel-white, #fff);
+}
+
+.exit-button {
+  background: var(--pixel-dark, #0f0f1e);
+  color: var(--pixel-white, #fff);
+  margin-top: 10px;
+}
+
+/* ============================================
+   BRIEFING STYLES
+   ============================================ */
+
+.briefing-container {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 40px 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.briefing-title {
+  font-size: 24px;
+  color: var(--pixel-yellow, #f9d71c);
+  text-align: center;
+  margin-bottom: 20px;
+  text-shadow: 3px 3px 0px var(--pixel-black, #000);
+}
+
+.briefing-description {
+  font-size: 12px;
+  color: var(--pixel-white, #fff);
+  text-align: center;
+  margin-bottom: 30px;
+  line-height: 1.6;
+}
+
+.briefing-section {
+  width: 100%;
+  background: var(--pixel-bg, #1a1a2e);
+  border: 3px solid var(--pixel-white, #fff);
+  box-shadow:
+    inset -2px -2px 0px var(--pixel-black, #000),
+    inset 2px 2px 0px var(--pixel-white, #fff);
+  padding: 20px;
+  margin: 20px 0;
+}
+
+.instructions-list {
+  margin-top: 15px;
+}
+
+.instruction-item {
+  margin: 10px 0;
+  padding-left: 10px;
+  font-size: 10px;
+  color: var(--pixel-white, #fff);
+  line-height: 1.6;
+}
+
+.briefing-reminder {
+  background: var(--pixel-blue, #00d9ff);
+  color: var(--pixel-black, #000);
+  padding: 15px;
+  border: 3px solid var(--pixel-white, #fff);
+  box-shadow: 4px 4px 0px var(--pixel-black, #000);
+  margin: 20px 0;
+  text-align: center;
+  font-size: 10px;
+}
+
+.briefing-countdown {
+  color: var(--pixel-green, #00ff41);
+  font-size: 11px;
+  text-align: center;
+  margin: 20px 0;
+  animation: pulse 2s infinite;
+}
+
+.exit-button-top {
+  position: absolute;
+  top: 20px;
+  left: 20px;
+  background: var(--pixel-dark, #0f0f1e);
+  border: 3px solid var(--pixel-white, #fff);
+  box-shadow:
+    inset -2px -2px 0px var(--pixel-black, #000),
+    inset 2px 2px 0px var(--pixel-white, #fff),
+    3px 3px 0px var(--pixel-black, #000);
+  color: var(--pixel-white, #fff);
+  padding: 10px 15px;
+  font-family: 'Press Start 2P', cursive;
+  font-size: 9px;
+  cursor: pointer;
+  transition: all 0.1s;
+  z-index: 100;
+}
+
+.exit-button-top:hover {
+  transform: translate(2px, 2px);
+  box-shadow:
+    inset -2px -2px 0px var(--pixel-black, #000),
+    inset 2px 2px 0px var(--pixel-white, #fff),
+    1px 1px 0px var(--pixel-black, #000);
+}
+
+/* ============================================
+   LEVEL VIEW STYLES
+   ============================================ */
+
+.level-view {
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--pixel-dark, #0f0f1e);
+}
+
+.level-top-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 15px 20px;
+  background: var(--pixel-bg, #1a1a2e);
+  border-bottom: 3px solid var(--pixel-white, #fff);
+  position: relative;
+}
+
+.level-title {
+  font-size: 14px;
+  color: var(--pixel-yellow, #f9d71c);
+  text-shadow: 2px 2px 0px var(--pixel-black, #000);
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.level-progress {
+  font-size: 10px;
+  color: var(--pixel-green, #00ff41);
+}
+
+.level-container {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  padding: 20px;
+  overflow: hidden;
+}
+
+.left-panel,
+.right-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+  overflow-y: auto;
+}
+
+/* ============================================
+   PLAYER CONTENT STYLES
+   ============================================ */
+
+.player-content {
+  padding: 10px 0;
+}
+
+.content-title {
+  color: var(--pixel-purple, #b300ff);
+  font-size: 11px;
+  margin-bottom: 15px;
+  text-shadow: 2px 2px 0px var(--pixel-black, #000);
+}
+
+.content-description {
+  color: var(--pixel-white, #fff);
+  font-size: 9px;
+  margin-bottom: 20px;
+  line-height: 1.5;
+}
+
+.content-instruction {
+  color: var(--pixel-blue, #00d9ff);
+  font-size: 9px;
+  margin-top: 15px;
+  font-style: italic;
+}
+
+/* Sequence Display (Player A) */
+.sequence-display {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 15px;
+  padding: 30px;
+  background: var(--pixel-dark, #0f0f1e);
+  border: 3px solid var(--pixel-yellow, #f9d71c);
+  box-shadow:
+    inset -2px -2px 0px var(--pixel-black, #000),
+    inset 2px 2px 0px var(--pixel-white, #fff),
+    0 0 10px var(--pixel-yellow, #f9d71c);
+  margin: 15px 0;
+}
+
+.sequence-symbol {
+  font-size: 48px;
+  filter: drop-shadow(2px 2px 0px var(--pixel-black, #000));
+}
+
+.sequence-arrow {
+  font-size: 24px;
+  color: var(--pixel-yellow, #f9d71c);
+}
+
+/* Mapping Table (Player B) */
+.mapping-table {
+  background: var(--pixel-dark, #0f0f1e);
+  border: 3px solid var(--pixel-blue, #00d9ff);
+  box-shadow:
+    inset -2px -2px 0px var(--pixel-black, #000),
+    inset 2px 2px 0px var(--pixel-white, #fff);
+  padding: 20px;
+  margin: 15px 0;
+}
+
+.mapping-row {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  padding: 10px;
+  margin: 8px 0;
+  background: var(--pixel-light, #16213e);
+  border: 2px solid var(--pixel-white, #fff);
+}
+
+.mapping-symbol {
+  font-size: 28px;
+  min-width: 40px;
+  text-align: center;
+}
+
+.mapping-arrow {
+  color: var(--pixel-blue, #00d9ff);
+  font-size: 16px;
+}
+
+.mapping-value {
+  color: var(--pixel-yellow, #f9d71c);
+  font-size: 12px;
+  font-weight: bold;
+}
+
+/* ============================================
+   CHAT STYLES
+   ============================================ */
+
+.chat-container {
+  background: var(--pixel-dark, #0f0f1e);
+  border: 3px solid var(--pixel-white, #fff);
+  box-shadow:
+    inset -2px -2px 0px var(--pixel-black, #000),
+    inset 2px 2px 0px var(--pixel-white, #fff);
+  padding: 15px;
+  height: 280px;
+  display: flex;
+  flex-direction: column;
+}
+
+.chat-messages {
+  flex: 1;
+  overflow-y: auto;
+  margin: 10px 0;
+  padding: 5px;
+}
+
+.chat-message {
+  margin-bottom: 10px;
+  font-size: 9px;
+  line-height: 1.5;
+  padding: 8px;
+  background: var(--pixel-light, #16213e);
+  border: 2px solid var(--pixel-white, #fff);
+  border-radius: 0;
+}
+
+.chat-message.system-message {
+  background: transparent;
+  border-color: var(--pixel-gray, #808080);
+  color: var(--pixel-gray, #808080);
+  font-style: italic;
+}
+
+.chat-message.own-message {
+  border-color: var(--pixel-green, #00ff41);
+  margin-left: 20px;
+}
+
+.chat-message.other-message {
+  border-color: var(--pixel-purple, #b300ff);
+  margin-right: 20px;
+}
+
+.chat-sender {
+  color: var(--pixel-purple, #b300ff);
+  margin-right: 8px;
+  font-weight: bold;
+}
+
+.chat-message.system-message .chat-sender {
+  color: var(--pixel-gray, #808080);
+}
+
+.chat-message.system-message .chat-text {
+  color: var(--pixel-gray, #808080);
+}
+
+.chat-message.own-message .chat-sender {
+  color: var(--pixel-green, #00ff41);
+}
+
+.chat-text {
+  color: var(--pixel-white, #fff);
+}
+
+.no-messages {
+  text-align: center;
+  color: var(--pixel-gray, #888);
+  font-size: 8px;
+  padding: 20px;
+  font-style: italic;
+}
+
+.chat-input-group {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.pixel-input.small {
+  flex: 1;
+  background: var(--pixel-light, #16213e);
+  border: 3px solid var(--pixel-white, #fff);
+  box-shadow:
+    inset 2px 2px 0px var(--pixel-black, #000),
+    inset -2px -2px 0px var(--pixel-white, #fff);
+  color: var(--pixel-white, #fff);
+  padding: 10px;
+  font-size: 10px;
+  font-family: 'Press Start 2P', cursive;
+  outline: none;
+}
+
+.pixel-input.small:focus {
+  border-color: var(--pixel-blue, #00d9ff);
+  box-shadow:
+    inset 2px 2px 0px var(--pixel-black, #000),
+    inset -2px -2px 0px var(--pixel-blue, #00d9ff),
+    0 0 8px var(--pixel-blue, #00d9ff);
+}
+
+.pixel-button.small {
+  background: var(--pixel-green, #00ff41);
+  border: 3px solid var(--pixel-white, #fff);
+  box-shadow:
+    inset -3px -3px 0px var(--pixel-black, #000),
+    inset 3px 3px 0px var(--pixel-white, #fff),
+    3px 3px 0px var(--pixel-black, #000);
+  color: var(--pixel-black, #000);
+  padding: 10px 15px;
+  font-size: 8px;
+  font-family: 'Press Start 2P', cursive;
+  cursor: pointer;
+  transition: all 0.1s;
+}
+
+.pixel-button.small:hover {
+  transform: translate(2px, 2px);
+  box-shadow:
+    inset -3px -3px 0px var(--pixel-black, #000),
+    inset 3px 3px 0px var(--pixel-white, #fff),
+    1px 1px 0px var(--pixel-black, #000);
+}
+
+/* ============================================
+   HINT PANEL STYLES
+   ============================================ */
+
+.moderator-panel {
+  background: var(--pixel-bg, #1a1a2e);
+  border: 3px solid var(--pixel-white, #fff);
+  box-shadow:
+    inset -2px -2px 0px var(--pixel-black, #000),
+    inset 2px 2px 0px var(--pixel-white, #fff);
+  padding: 15px;
+  min-height: 80px;
+  transition: all 0.3s;
+}
+
+.moderator-panel.active {
+  background: var(--pixel-blue, #00d9ff);
+  border-color: var(--pixel-blue, #00d9ff);
+  box-shadow:
+    inset -2px -2px 0px var(--pixel-black, #000),
+    inset 2px 2px 0px var(--pixel-white, #fff),
+    0 0 15px var(--pixel-blue, #00d9ff);
+  animation: glow 2s infinite;
+}
+
+.hint-message {
+  color: var(--pixel-black, #000);
+  font-size: 10px;
+  line-height: 1.6;
+  margin-top: 10px;
+}
+
+.moderator-panel:not(.active) .hint-message {
+  color: var(--pixel-white, #fff);
+}
+
+.no-hint {
+  color: var(--pixel-gray, #888);
+  font-size: 8px;
+  text-align: center;
+  padding: 10px;
+  font-style: italic;
+}
+
+/* ============================================
+   ANSWER SECTION STYLES
+   ============================================ */
+
+.answer-section {
+  flex: 1;
+}
+
+.answer-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+  margin: 15px 0;
+}
+
+.answer-wrapper {
+  position: relative;
+}
+
+.answer-button {
+  width: 100%;
+  background: var(--pixel-light, #16213e);
+  border: 3px solid var(--pixel-white, #fff);
+  box-shadow:
+    inset -2px -2px 0px var(--pixel-black, #000),
+    inset 2px 2px 0px var(--pixel-white, #fff),
+    4px 4px 0px var(--pixel-black, #000);
+  padding: 15px;
+  font-size: 11px;
+  font-family: 'Press Start 2P', cursive;
+  color: var(--pixel-white, #fff);
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  min-height: 80px;
+  justify-content: center;
+}
+
+.answer-button:hover {
+  transform: translate(2px, 2px);
+  box-shadow:
+    inset -2px -2px 0px var(--pixel-black, #000),
+    inset 2px 2px 0px var(--pixel-white, #fff),
+    2px 2px 0px var(--pixel-black, #000);
+}
+
+.answer-button.selected {
+  background: var(--pixel-yellow, #f9d71c);
+  color: var(--pixel-black, #000);
+  border-color: var(--pixel-yellow, #f9d71c);
+  box-shadow:
+    inset -3px -3px 0px var(--pixel-black, #000),
+    inset 3px 3px 0px var(--pixel-white, #fff),
+    4px 4px 0px var(--pixel-black, #000),
+    0 0 15px var(--pixel-yellow, #f9d71c);
+}
+
+.button-icon {
+  font-size: 24px;
+}
+
+.button-label {
+  font-size: 9px;
+  text-align: center;
+  line-height: 1.3;
+}
+
+.selection-number {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  background: var(--pixel-green, #00ff41);
+  color: var(--pixel-black, #000);
+  border: 2px solid var(--pixel-white, #fff);
+  border-radius: 50%;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: bold;
+  box-shadow: 2px 2px 0px var(--pixel-black, #000);
+}
+
+.selected-sequence {
+  background: var(--pixel-dark, #0f0f1e);
+  border: 2px solid var(--pixel-green, #00ff41);
+  padding: 15px;
+  margin-top: 15px;
+}
+
+.sequence-label {
+  color: var(--pixel-green, #00ff41);
+  font-size: 9px;
+  margin-bottom: 10px;
+}
+
+.sequence-items {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.sequence-item {
+  color: var(--pixel-yellow, #f9d71c);
+  font-size: 10px;
+}
+
+/* ============================================
+   CONFIRM BUTTON STYLES
+   ============================================ */
+
+.confirm-section {
+  margin-top: 20px;
+}
+
+.exit-notice {
+  margin-top: 12px;
+  padding: 10px;
+  border: 2px solid var(--pixel-yellow, #f9d71c);
+  background: var(--pixel-dark, #0f0f1e);
+  box-shadow:
+    inset -2px -2px 0px var(--pixel-black, #000),
+    inset 2px 2px 0px var(--pixel-white, #fff);
+}
+
+.exit-notice-text {
+  color: var(--pixel-yellow, #f9d71c);
+  font-size: 9px;
+  margin-bottom: 6px;
+}
+
+.confirm-button {
+  background: var(--pixel-green, #00ff41);
+  width: 100%;
+  padding: 18px;
+  font-size: 12px;
+  position: relative;
+}
+
+.confirm-button:disabled {
+  background: var(--pixel-dark, #0f0f1e);
+  color: var(--pixel-gray, #888);
+  cursor: not-allowed;
+}
+
+.confirm-button.confirming {
+  background: var(--pixel-yellow, #f9d71c);
+  animation: pulse 1.5s infinite;
+}
+
+.confirm-button.confirming::before {
+  content: '🔑';
+  display: inline-block;
+  margin-right: 10px;
+  animation: keyRotate 2s linear infinite;
+}
+
+.other-player-waiting {
+  text-align: center;
+  color: var(--pixel-blue, #00d9ff);
+  font-size: 9px;
+  margin-top: 10px;
+  animation: pulse 2s infinite;
+}
+
+/* ============================================
+   RESULT MESSAGE STYLES
+   ============================================ */
+
+.result-message {
+  padding: 15px;
+  border: 3px solid var(--pixel-white, #fff);
+  box-shadow: 4px 4px 0px var(--pixel-black, #000);
+  text-align: center;
+  font-size: 10px;
+  margin-top: 15px;
+  line-height: 1.5;
+}
+
+.result-message.retry {
+  background: var(--pixel-blue, #00d9ff);
+  color: var(--pixel-black, #000);
+  animation: shake 0.5s;
+}
+
+.result-message.sync-confirm {
+  background: var(--pixel-yellow, #f9d71c);
+  color: var(--pixel-black, #000);
+  animation: keyAlign 1.5s;
+}
+
+.result-message.success {
+  background: var(--pixel-green, #00ff41);
+  color: var(--pixel-black, #000);
+}
+
+/* ============================================
+   SUCCESS SCREEN STYLES
+   ============================================ */
+
+.success-container {
+  max-width: 700px;
+  margin: 0 auto;
+  padding: 60px 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.success-animation {
+  position: relative;
+  width: 300px;
+  height: 300px;
+  margin-bottom: 40px;
+}
+
+.door-opening {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  display: flex;
+}
+
+.door-left,
+.door-right {
+  width: 50%;
+  height: 100%;
+  background: var(--pixel-bg, #1a1a2e);
+  border: 4px solid var(--pixel-yellow, #f9d71c);
+  box-shadow: 0 0 20px var(--pixel-yellow, #f9d71c);
+  animation: doorOpen 2s ease-out;
+}
+
+.door-left {
+  transform-origin: left;
+  animation-name: doorOpenLeft;
+}
+
+.door-right {
+  transform-origin: right;
+  animation-name: doorOpenRight;
+}
+
+@keyframes doorOpenLeft {
+  0% {
+    transform: perspective(400px) rotateY(0deg);
+  }
+  100% {
+    transform: perspective(400px) rotateY(-90deg);
+  }
+}
+
+@keyframes doorOpenRight {
+  0% {
+    transform: perspective(400px) rotateY(0deg);
+  }
+  100% {
+    transform: perspective(400px) rotateY(90deg);
+  }
+}
+
+.success-particles {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 200px;
+  height: 200px;
+  background: radial-gradient(circle, var(--pixel-yellow, #f9d71c) 0%, transparent 70%);
+  animation: particleExpand 2s ease-out infinite;
+  opacity: 0.5;
+}
+
+@keyframes particleExpand {
+  0% {
+    transform: translate(-50%, -50%) scale(0);
+    opacity: 0;
+  }
+  50% {
+    opacity: 0.8;
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(1.5);
+    opacity: 0;
+  }
+}
+
+.success-title {
+  font-size: 36px;
+  color: var(--pixel-green, #00ff41);
+  text-shadow: 4px 4px 0px var(--pixel-black, #000);
+  margin-bottom: 25px;
+  animation: bounce 1s ease-in-out;
+}
+
+@keyframes bounce {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-20px);
+  }
+}
+
+.success-message {
+  font-size: 12px;
+  color: var(--pixel-white, #fff);
+  line-height: 1.8;
+  margin-bottom: 30px;
+}
+
+.success-stars {
+  margin: 20px 0;
+}
+
+.success-stars .star {
+  font-size: 48px;
+  margin: 0 10px;
+  display: inline-block;
+  animation: starPop 0.5s ease-out;
+  animation-fill-mode: backwards;
+}
+
+.success-stars .star:nth-child(1) {
+  animation-delay: 0.2s;
+}
+
+.success-stars .star:nth-child(2) {
+  animation-delay: 0.4s;
+}
+
+.success-stars .star:nth-child(3) {
+  animation-delay: 0.6s;
+}
+
+@keyframes starPop {
+  0% {
+    transform: scale(0);
+    opacity: 0;
+  }
+  50% {
+    transform: scale(1.2);
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.auto-continue-hint {
+  color: var(--pixel-gray, #888);
+  font-size: 8px;
+  margin-top: 20px;
+  font-style: italic;
+}
+
+/* ============================================
+   ANIMATIONS
+   ============================================ */
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.6;
+  }
+}
+
+@keyframes glow {
+  0%, 100% {
+    box-shadow:
+      inset -2px -2px 0px var(--pixel-black, #000),
+      inset 2px 2px 0px var(--pixel-white, #fff),
+      0 0 10px var(--pixel-blue, #00d9ff);
+  }
+  50% {
+    box-shadow:
+      inset -2px -2px 0px var(--pixel-black, #000),
+      inset 2px 2px 0px var(--pixel-white, #fff),
+      0 0 20px var(--pixel-blue, #00d9ff);
+  }
+}
+
+/* ============================================
+   RESPONSIVE DESIGN
+   ============================================ */
+
+@media (max-width: 1024px) {
+  .level-container {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto;
+  }
+
+  .answer-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .sequence-display {
+    flex-wrap: wrap;
+    padding: 20px;
+  }
+
+  .sequence-symbol {
+    font-size: 36px;
+  }
+}
+
+@media (max-width: 768px) {
+  .level-title {
+    font-size: 11px;
+    position: static;
+    transform: none;
+  }
+
+  .level-top-bar {
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .answer-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .answer-button {
+    min-height: 70px;
+    font-size: 10px;
+  }
+
+  .session-code-display {
+    font-size: 24px;
+    letter-spacing: 4px;
+  }
+
+  .chat-container {
+    height: 220px;
+  }
+
+  .success-animation {
+    width: 200px;
+    height: 200px;
+  }
+
+  .success-title {
+    font-size: 24px;
+  }
+}
+
+/* ============================================
+   ACCESSIBILITY
+   ============================================ */
+
+/* Keyboard navigation */
+.answer-button:focus,
+.pixel-button:focus {
+  outline: 3px solid var(--pixel-blue, #00d9ff);
+  outline-offset: 3px;
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

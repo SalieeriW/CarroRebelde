@@ -35,27 +35,11 @@ export class Trap extends Schema {
     @type("number") duration: number = 5000;
 }
 
-export class Challenge extends Schema {
-    @type("string") word: string = "";
-    @type("string") phase: string = "waiting";
-    @type("string") currentDrawer: string = "";
-    @type("string") currentGuesser: string = "";
-    @type("number") timeLeft: number = 0;
-    @type("string") drawing1Data: string = "";
-    @type("string") drawing2Data: string = "";
-    @type("string") guess: string = "";
-    @type("boolean") active: boolean = false;
-}
-
 export class GameState extends Schema {
     @type({ map: Player }) players = new MapSchema<Player>();
     @type({ map: Trap }) traps = new MapSchema<Trap>();
     @type(Car) car = new Car();
-    @type("string") gamePhase: string = "lobby"; // lobby, playing, challenge, finished
-    @type(Challenge) challenge = new Challenge();
-    @type("number") challengePortalX: number = 0;
-    @type("number") challengePortalZ: number = 0;
-    @type("boolean") challengePortalActive: boolean = false;
+    @type("string") gamePhase: string = "lobby"; // lobby, playing, finished
     @type("string") radioStation: string = "normal";
     @type("boolean") hornActive: boolean = false;
     @type("boolean") bgmEnabled: boolean = true;
@@ -81,4 +65,6 @@ export class GameState extends Schema {
     @type("boolean") minigameActive: boolean = false;
     @type("string") minigameSessionId: string = "";
     @type("string") minigameResult: string = "";
+    @type("string") minigameType: string = ""; // "two-keys-gate", "gomoku-duel"
+    @type("string") playedMinigames: string = "[]"; // JSON array of played minigame types
 }

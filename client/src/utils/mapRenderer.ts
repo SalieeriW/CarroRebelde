@@ -5,7 +5,6 @@ export function drawCircuitMap(
     canvasHeight: number,
     carPosition: { x: number; z: number; angle: number },
     traps: any[],
-    challengePortal: { x: number; z: number; active: boolean },
     pathHistory: Array<{ x: number; z: number }>,
     startPoint: { x: number; z: number },
     _endPoint: { x: number; z: number },
@@ -216,17 +215,6 @@ export function drawCircuitMap(
         ctx.stroke();
     });
 
-    // Draw challenge portal
-    if (challengePortal.active) {
-        const portalScreen = worldToScreen(challengePortal.x, challengePortal.z);
-        ctx.fillStyle = "#ff00ff";
-        ctx.beginPath();
-        ctx.arc(portalScreen.x, portalScreen.y, 10 * scale, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.strokeStyle = "#ffffff";
-        ctx.lineWidth = 3;
-        ctx.stroke();
-    }
 
     // Draw car
     const carScreen = worldToScreen(carPosition.x, carPosition.z);

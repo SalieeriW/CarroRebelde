@@ -4,141 +4,27 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>🎮 Minijuego - Blind Rally</title>
-    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
-        body {
-            background: #0a0a0f;
-            font-family: 'Press Start 2P', monospace;
-            min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: #fff;
-        }
-        
-        .container {
-            background: #1a1a2e;
-            border: 8px solid #16213e;
-            box-shadow: 8px 8px 0px #0f0f23, inset 0 0 0 4px #2a2a4e;
-            padding: 40px 60px;
-            text-align: center;
-            max-width: 500px;
-        }
-        
-        h1 {
-            color: #ffd700;
-            font-size: 20px;
-            margin-bottom: 20px;
-            text-shadow: 3px 3px 0px #1a1a2e;
-        }
-        
-        .info {
-            color: #888;
-            font-size: 10px;
-            margin-bottom: 30px;
-            line-height: 2;
-        }
-        
-        .role {
-            display: inline-block;
-            background: #e94560;
-            color: #fff;
-            padding: 8px 16px;
-            font-size: 12px;
-            margin-bottom: 20px;
-        }
-        
-        .role.navigator {
-            background: #00d4ff;
-            color: #000;
-        }
-        
-        .spinner {
-            width: 60px;
-            height: 60px;
-            border: 6px solid #0f3460;
-            border-top: 6px solid #e94560;
-            border-radius: 50%;
-            margin: 30px auto;
-            animation: spin 1s linear infinite;
-        }
-        
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-        
-        .waiting {
-            color: #00ff88;
-            font-size: 12px;
-            animation: pulse 1s ease-in-out infinite;
-        }
-        
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.5; }
-        }
-        
-        .note {
-            color: #555;
-            font-size: 8px;
-            margin-top: 30px;
-            line-height: 1.8;
-        }
-    </style>
+    <script>
+        // Redirect to the actual minigame
+        (function() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const sessionId = urlParams.get('session');
+            const roomCode = urlParams.get('room');
+            const role = urlParams.get('role');
+            
+            // Determine minigame URL
+            // In production, this would be the minigame service URL
+            // For now, we'll use localhost:5174 (minigame client)
+            const hostname = window.location.hostname;
+            const minigamePort = hostname === 'localhost' || hostname === '127.0.0.1' ? '5174' : '5174';
+            const minigameUrl = `http://${hostname}:${minigamePort}?room=${roomCode || ''}&session=${sessionId || ''}&role=${role || ''}`;
+            
+            // Redirect immediately
+            window.location.href = minigameUrl;
+        })();
+    </script>
 </head>
 <body>
-    <div class="container">
-        <h1>🎮 MINIJUEGO</h1>
-        
-        <div class="role" id="role">CARGANDO...</div>
-        
-        <p class="info">
-            Este minijuego es cooperativo.<br>
-            Ambos jugadores deben completarlo juntos.
-        </p>
-        
-        <div class="spinner"></div>
-        
-        <p class="waiting">
-            Esperando resultado del servidor...
-        </p>
-        
-        <p class="note">
-            (DEMO: El servidor decide automáticamente<br>
-            con 50% probabilidad de ganar)
-        </p>
-    </div>
-
-    <script>
-        // Get params from URL
-        const urlParams = new URLSearchParams(window.location.search);
-        const sessionId = urlParams.get('session');
-        const roomCode = urlParams.get('room');
-        const role = urlParams.get('role');
-        
-        // Update role display
-        const roleEl = document.getElementById('role');
-        if (role === 'driver') {
-            roleEl.textContent = '🚗 DRIVER';
-            roleEl.className = 'role driver';
-        } else if (role === 'navigator') {
-            roleEl.textContent = '🗺️ NAVIGATOR';
-            roleEl.className = 'role navigator';
-        }
-        
-        console.log('Minigame opened:', { sessionId, roomCode, role });
-        
-        // Auto-close after 5 seconds (result will be shown in main game)
-        setTimeout(() => {
-            window.close();
-        }, 4000);
-    </script>
+    <p>Redirigiendo al minijuego...</p>
 </body>
 </html>

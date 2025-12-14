@@ -1,0 +1,116 @@
+{
+  "levels": [
+    {
+      "id": 1,
+      "name": "Puerta de Runas",
+      "nameES": "Puerta de Runas",
+      "theme": "magic_runes",
+      "playerA": {
+        "title": "Tu Vista (Jugador A)",
+        "description": "Ves esta secuencia de runas:",
+        "sequence": ["𓂀", "✦", "☽"],
+        "instruction": "Lee las runas en orden a tu compañero."
+      },
+      "playerB": {
+        "title": "Tu Información (Jugador B)",
+        "description": "Significado de las runas (Símbolo → Emoción):",
+        "mapping": {
+          "𓂀": "Calma",
+          "✦": "Esperanza",
+          "☽": "Valentía"
+        },
+        "instruction": "Traduce cada símbolo a la emoción y conserva el orden."
+      },
+      "correctAnswer": ["Calma", "Esperanza", "Valentía"],
+      "options": ["Calma", "Esperanza", "Valentía", "Duda", "Serenidad", "Intriga"],
+      "hints": {
+        "generic": "💡 Las runas representan emociones, vayan una por una.",
+        "specific": "💡 Piensen qué emociones son 𓂀, ✦ y ☽.",
+        "stepByStep": "💡 1) A dice el primer símbolo, B responde la emoción; 2) repitan con el segundo; 3) luego el tercero."
+      },
+      "successMessage": "¡Runas alineadas! El orden de emociones es correcto.",
+      "retryMessage": "El orden o las emociones no coinciden, revisen de nuevo."
+    },
+    {
+      "id": 2,
+      "name": "Navegación Estelar",
+      "nameES": "Navegación Estelar",
+      "theme": "space_navigation",
+      "playerA": {
+        "title": "Tu Vista (Jugador A)",
+        "description": "Ruta de navegación:",
+        "sequence": ["→", "↑", "←"],
+        "instruction": "Di los rumbos en orden."
+      },
+      "playerB": {
+        "title": "Tu Información (Jugador B)",
+        "description": "Dirección → Color:",
+        "mapping": {
+          "→": "Azul",
+          "↑": "Verde",
+          "←": "Naranja"
+        },
+        "instruction": "Traduce cada rumbo a color y mantén el orden."
+      },
+      "correctAnswer": ["Azul", "Verde", "Naranja"],
+      "options": ["Azul", "Verde", "Naranja", "Rojo", "Morado", "Amarillo"],
+      "hints": {
+        "generic": "💡 La ruta se arma paso a paso: cada dirección es un color.",
+        "specific": "💡 Empiecen por el primer rumbo y su color, luego sigan.",
+        "stepByStep": "💡 A dice el rumbo, B responde el color y lo anotan en orden."
+      },
+      "successMessage": "¡Ruta correcta! La nave sigue en curso.",
+      "retryMessage": "La ruta no coincide, revisen direcciones y colores."
+    },
+    {
+      "id": 3,
+      "name": "Resonancia Elemental",
+      "nameES": "Resonancia Elemental",
+      "theme": "elements",
+      "playerA": {
+        "title": "Tu Vista (Jugador A)",
+        "description": "Orden de elementos:",
+        "sequence": ["🌊", "🌀", "🔥"],
+        "instruction": "Di los elementos en orden."
+      },
+      "playerB": {
+        "title": "Tu Información (Jugador B)",
+        "description": "Elemento → Forma:",
+        "mapping": {
+          "🌊": "Círculo",
+          "🌀": "Triángulo",
+          "🔥": "Cuadrado"
+        },
+        "instruction": "Traduce cada elemento a su forma, mantén el orden."
+      },
+      "correctAnswer": ["Círculo", "Triángulo", "Cuadrado"],
+      "options": ["Círculo", "Triángulo", "Cuadrado", "Rombo", "Estrella", "Hexágono"],
+      "hints": {
+        "generic": "💡 Cada elemento tiene su forma; respeten el orden.",
+        "specific": "💡 Piensen qué forma corresponde a Agua, Viento y Fuego.",
+        "stepByStep": "💡 A dice el elemento, B responde la forma, apunten la secuencia."
+      },
+      "successMessage": "¡Resonancia lograda! El orden elemental es correcto.",
+      "retryMessage": "Forma u orden incorrectos, vuelvan a alinear."
+    }
+  ],
+  "briefing": {
+    "title": "Bienvenidos a La Puerta de Dos Llaves",
+    "description": "Necesitarán trabajar juntos para abrir la puerta.",
+    "instructions": [
+      "1. Cada jugador verá información diferente.",
+      "2. Comuniquen lo que ven usando el chat.",
+      "3. Juntos, elijan la secuencia correcta.",
+      "4. Presionen 'Insertar Llave' al mismo tiempo."
+    ],
+    "reminder": "Recuerden: No hay prisa. Tómense el tiempo necesario.",
+    "startButton": "Comenzar"
+  },
+  "messages": {
+    "waitingForPartner": "Esperando al otro jugador...",
+    "syncFailed": "Necesitamos sincronizarnos mejor. ¡Intentemos de nuevo!",
+    "answersDifferent": "Parece que eligieron respuestas diferentes. Revisen juntos.",
+    "exitConfirm": "¿Quieres salir del desafío? Puedes volver cuando quieras.",
+    "playerLeft": "Tu compañero se ha desconectado. Puedes esperar o volver al tablero."
+  }
+}

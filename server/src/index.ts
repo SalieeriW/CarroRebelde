@@ -5,6 +5,7 @@ import { Server, matchMaker } from "colyseus";
 import { GameRoom } from "./rooms/GameRoom";
 import os from "os";
 import { initDatabase, getUserByUsername, getUserById, createUser, usernameExists } from "./database";
+import { request } from "http";
 
 const port = Number(process.env.PORT || 2567);
 const app = express();
@@ -288,9 +289,20 @@ app.post("/monitor/create-room", verifyToken, async (req: any, res) => {
     
     console.log(`🎮 Monitor ${req.user.username} created room: ${room.roomId}`);
     
+    // Wait a bit for room to initialize, then get the room code
+    await new Promise(resolve => setTimeout(resolve, 100));
+    
     // Get the room code from the room state if available
     const roomInstance = matchMaker.getRoomById(room.roomId);
-    const roomCode = (roomInstance as any)?.roomCode || room.roomId.substring(0, 6).toUpperCase();
+    if (!roomInstance) {
+      throw new Error("Room instance not found after creation");
+    }
+    
+    const roomCode = (roomInstance as any)?.state?.roomCode || 
+                    (roomInstance as any)?.roomCode || 
+                    room.roomId.substring(0, 6).toUpperCase();
+    
+    console.log(`✅ Room created successfully: ${room.roomId}, code: ${roomCode}`);
     
     res.json({ 
       success: true, 
@@ -298,14 +310,17 @@ app.post("/monitor/create-room", verifyToken, async (req: any, res) => {
       roomCode,
       message: "Room created. Assign players to this room."
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error creating room:", error);
-    res.status(500).json({ error: "Failed to create room" });
+    res.status(500).json({ 
+      error: "Failed to create room",
+      details: error?.message || String(error)
+    });
   }
 });
 
 // Assign players to an existing room (monitor only)
-app.post("/monitor/assign-players", verifyToken, (req: any, res) => {
+app.post("/monitor/assign-players", verifyToken, async (req: any, res) => {
   if (req.user.role !== "monitor") {
     return res.status(403).json({ error: "Only monitors can assign players" });
   }
@@ -318,6 +333,31 @@ app.post("/monitor/assign-players", verifyToken, (req: any, res) => {
   
   if (!roomId) {
     return res.status(400).json({ error: "roomId is required" });
+  }
+  
+  // Verify that the room still exists before assigning players
+  try {
+    const roomInstance = matchMaker.getRoomById(roomId);
+    if (!roomInstance) {
+      console.warn(`⚠️ Monitor ${req.user.username} tried to assign players to non-existent room: ${roomId}`);
+      return res.status(404).json({ 
+        error: "Room not found. Please create a new room first.",
+        roomId 
+      });
+    }
+    
+    // Also check if room is in activeRooms
+    const roomInfo = activeRooms.get(roomId);
+    if (!roomInfo) {
+      console.warn(`⚠️ Room ${roomId} exists but not in activeRooms - this might be a stale room`);
+      // Don't fail here, but log a warning
+    }
+  } catch (error: any) {
+    console.error(`❌ Error verifying room ${roomId}:`, error);
+    return res.status(500).json({ 
+      error: "Failed to verify room existence",
+      details: error?.message || String(error)
+    });
   }
   
   // Remove players from waiting queue
@@ -366,9 +406,26 @@ app.get("/queue/status", verifyToken, (req: any, res) => {
   // Check if player is assigned to any room
   for (const [roomId, assignment] of pendingAssignments.entries()) {
     if (assignment.playerIds.includes(req.user.id)) {
+      const assignedRoomId = assignment.roomId || roomId;
+      
+      // Verify room still exists
+      try {
+        const roomInstance = matchMaker.getRoomById(assignedRoomId);
+        if (!roomInstance) {
+          console.warn(`⚠️ Assigned room ${assignedRoomId} no longer exists, removing assignment`);
+          pendingAssignments.delete(roomId);
+          continue;
+        }
+      } catch (err) {
+        console.warn(`⚠️ Error checking room ${assignedRoomId}:`, err);
+        pendingAssignments.delete(roomId);
+        continue;
+      }
+      
+      console.log(`✅ Player ${req.user.username} assigned to room ${assignedRoomId}`);
       return res.json({
         status: "assigned",
-        roomId: assignment.roomId || roomId
+        roomId: assignedRoomId
       });
     }
   }
@@ -387,11 +444,63 @@ app.get("/queue/status", verifyToken, (req: any, res) => {
 // ========== MINIGAME ENDPOINTS ==========
 
 // Start a minigame session (called when driver hits a cone)
-app.post("/minigame/start", (req, res) => {
+app.post("/minigame/start", async (req, res) => {
   const { roomCode } = req.body;
   
   if (!roomCode) {
     return res.status(400).json({ error: "roomCode is required" });
+  }
+  
+  // CLEAR previous sessions for this roomCode to prevent old results from being applied
+  for (const [sessionId, session] of minigameSessions.entries()) {
+    if (session.roomCode === roomCode) {
+      minigameSessions.delete(sessionId);
+      console.log(`🗑️ Cleared previous minigame session: ${sessionId} for room ${roomCode}`);
+    }
+  }
+  
+  // RESET the minigame room state to clear previous game results
+  try {
+    const minigameApiUrl = process.env.MINIGAME_API_URL || 'http://localhost:3001';
+    const url = new URL(`${minigameApiUrl}/rooms/${roomCode}/reset`);
+    
+    // Use Node.js http module to make the request
+    const postData = '';
+    const options = {
+      hostname: url.hostname,
+      port: url.port || (url.protocol === 'https:' ? 443 : 80),
+      path: url.pathname,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(postData)
+      }
+    };
+
+    await new Promise<void>((resolve, reject) => {
+      const req = request(options, (res) => {
+        if (res.statusCode === 200 || res.statusCode === 201) {
+          console.log(`🔄 Reset minigame room: ${roomCode}`);
+          resolve();
+        } else {
+          console.warn(`⚠️ Failed to reset minigame room: ${roomCode}`, res.statusCode);
+          resolve(); // Don't reject, just log the warning
+        }
+        res.on('data', () => {}); // Consume response
+        res.on('end', () => resolve());
+      });
+
+      req.on('error', (error) => {
+        console.warn(`⚠️ Error resetting minigame room: ${roomCode}`, error.message);
+        resolve(); // Don't reject, just log the warning
+      });
+
+      req.write(postData);
+      req.end();
+    });
+  } catch (error) {
+    console.warn(`⚠️ Error resetting minigame room: ${roomCode}`, error);
+    // Continue anyway - the minigame will still work
   }
   
   // Generate unique session ID
@@ -415,33 +524,65 @@ app.post("/minigame/start", (req, res) => {
 });
 
 // Receive result from minigame service (external service will call this)
+// Expected format: {"won": true/false, "roomCode": "ABCD"} or {"won": true/false, "sessionId": "..."}
 app.post("/minigame/result", (req, res) => {
-  const { sessionId, won, roomCode } = req.body;
+  const { won, roomCode, sessionId } = req.body;
   
-  // Can use sessionId OR roomCode to identify the game
+  if (typeof won !== 'boolean') {
+    return res.status(400).json({ error: "Field 'won' (boolean) is required" });
+  }
+  
+  // Identify room by sessionId or roomCode
   let targetRoomCode = roomCode;
+  let targetSessionId = sessionId;
   
-  if (sessionId) {
+  if (sessionId && !targetRoomCode) {
     const session = minigameSessions.get(sessionId);
     if (session) {
       targetRoomCode = session.roomCode;
+      targetSessionId = sessionId;
       session.result = won ? "won" : "lost";
+    } else {
+      // Session not found - might be an old session
+      return res.status(404).json({ error: "Minigame session not found or expired" });
     }
   }
   
   if (!targetRoomCode) {
-    return res.status(400).json({ error: "roomCode or valid sessionId is required" });
+    return res.status(400).json({ error: "roomCode or sessionId is required" });
   }
   
-  // Find the room and resolve the minigame
+  // Find the room and verify the sessionId matches the active minigame
   const room = roomsByCode.get(targetRoomCode);
-  if (room && room.resolveMinigame) {
-    room.resolveMinigame(won === true);
-    console.log(`🎮 Minigame result received for room ${targetRoomCode}: ${won ? 'WON' : 'LOST'}`);
-    res.json({ success: true, result: won ? "won" : "lost" });
+  if (!room) {
+    return res.status(404).json({ error: "Room not found" });
+  }
+  
+  // CRITICAL: Verify that the sessionId matches the current active minigame session
+  // This prevents old results from being applied to new minigames
+  if (targetSessionId && room.state.minigameSessionId && room.state.minigameSessionId !== targetSessionId) {
+    console.log(`⚠️ Rejected minigame result: sessionId mismatch. Expected: ${room.state.minigameSessionId}, Got: ${targetSessionId}`);
+    return res.status(400).json({ error: "Minigame session mismatch. This result is for a different minigame session." });
+  }
+  
+  // Only resolve if there's an active minigame
+  if (!room.state.minigameActive) {
+    console.log(`⚠️ Rejected minigame result: no active minigame for room ${targetRoomCode}`);
+    return res.status(400).json({ error: "No active minigame for this room" });
+  }
+  
+  if (room.resolveMinigame) {
+    room.resolveMinigame(won);
+    
+    // Clean up the session after resolving
+    if (targetSessionId) {
+      minigameSessions.delete(targetSessionId);
+      console.log(`🗑️ Cleaned up resolved minigame session: ${targetSessionId}`);
+    }
+    
+    res.json({ success: true });
   } else {
-    console.log(`⚠️ Room not found for code: ${targetRoomCode}`);
-    res.status(404).json({ error: "Room not found" });
+    res.status(500).json({ error: "Room does not support minigame resolution" });
   }
 });
 

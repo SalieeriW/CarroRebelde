@@ -1,0 +1,49 @@
+version: "3.8"
+
+services:
+  twokeys-server:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    container_name: twokeys-server
+    ports:
+      - "3001:3001"
+    networks:
+      - twokeys-net
+    restart: unless-stopped
+
+  player-a:
+    build:
+      context: .
+      dockerfile: client/Dockerfile
+    container_name: twokeys-player-a
+    environment:
+      - PORT=8174
+      - VITE_API_URL=http://localhost:3001
+    ports:
+      - "8174:8174"
+    depends_on:
+      - twokeys-server
+    networks:
+      - twokeys-net
+    restart: unless-stopped
+
+  player-b:
+    build:
+      context: .
+      dockerfile: client/Dockerfile
+    container_name: twokeys-player-b
+    environment:
+      - PORT=8175
+      - VITE_API_URL=http://localhost:3001
+    ports:
+      - "8175:8175"
+    depends_on:
+      - twokeys-server
+    networks:
+      - twokeys-net
+    restart: unless-stopped
+
+networks:
+  twokeys-net:
+    driver: bridge

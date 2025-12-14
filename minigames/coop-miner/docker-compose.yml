@@ -1,0 +1,37 @@
+services:
+  miner-api:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    container_name: miner-api
+    ports:
+      - "7001:7001"
+    restart: unless-stopped
+
+  miner-player-a:
+    build:
+      context: .
+      dockerfile: client/Dockerfile
+    container_name: miner-player-a
+    environment:
+      - PORT=7084
+      - VITE_API_URL=http://localhost:7001
+    ports:
+      - "7084:7084"
+    depends_on:
+      - miner-api
+    restart: unless-stopped
+
+  miner-player-b:
+    build:
+      context: .
+      dockerfile: client/Dockerfile
+    container_name: miner-player-b
+    environment:
+      - PORT=7085
+      - VITE_API_URL=http://localhost:7001
+    ports:
+      - "7085:7085"
+    depends_on:
+      - miner-api
+    restart: unless-stopped

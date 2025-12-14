@@ -66,4 +66,6 @@ export class GameState extends Schema {
     @type("boolean") minigameActive: boolean = false;
     @type("string") minigameSessionId: string = ""; // ID único para el minijuego actual
     @type("string") minigameResult: string = ""; // "pending", "won", "lost"
+    @type("string") minigameType: string = ""; // "two-keys-gate", "gomoku-duel"
+    @type("string") playedMinigames: string = "[]"; // JSON array of played minigame types
 }

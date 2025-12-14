@@ -56,23 +56,32 @@ Content-Type: application/json
 
 ```json
 {
-  "roomCode": "ABCD",
-  "won": true
+  "won": true,
+  "roomCode": "ABCD"
+}
+```
+
+O usando `sessionId`:
+
+```json
+{
+  "won": false,
+  "sessionId": "mg_1234567890_abc123def"
 }
 ```
 
 | Campo | Tipo | Requerido | Descripción |
 |-------|------|-----------|-------------|
-| `roomCode` | string | ✅ Sí | Código de 4 letras de la sala (ej: "ABCD") |
 | `won` | boolean | ✅ Sí | `true` si ganaron, `false` si perdieron |
+| `roomCode` | string | ⚠️ Sí* | Código de 4 letras de la sala (ej: "ABCD"). Requerido si no se envía `sessionId` |
+| `sessionId` | string | ⚠️ Sí* | ID de sesión del minijuego. Requerido si no se envía `roomCode` |
 
 #### Response
 
 **Éxito (200)**:
 ```json
 {
-  "success": true,
-  "result": "won"
+  "success": true
 }
 ```
 
@@ -86,7 +95,15 @@ Content-Type: application/json
 **Error - Parámetros faltantes (400)**:
 ```json
 {
-  "error": "roomCode or valid sessionId is required"
+  "error": "Field 'won' (boolean) is required"
+}
+```
+
+O:
+
+```json
+{
+  "error": "roomCode or sessionId is required"
 }
 ```
 
@@ -165,8 +182,13 @@ Cuando se abre la pestaña del minijuego, la URL incluye estos parámetros:
 
 ```javascript
 // Cuando el minijuego termina
-async function sendMinigameResult(roomCode, won) {
+async function sendMinigameResult(won) {
   const serverUrl = 'http://localhost:2567';
+  
+  // Obtener roomCode de la URL
+  const urlParams = new URLSearchParams(window.location.search);
+  const roomCode = urlParams.get('room');
+  const sessionId = urlParams.get('session');
   
   try {
     const response = await fetch(`${serverUrl}/minigame/result`, {
@@ -175,15 +197,16 @@ async function sendMinigameResult(roomCode, won) {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        roomCode: roomCode,
-        won: won
+        won: won,
+        roomCode: roomCode || undefined,
+        sessionId: sessionId || undefined
       })
     });
     
     const data = await response.json();
     
     if (data.success) {
-      console.log('✅ Resultado enviado:', data.result);
+      console.log('✅ Resultado enviado');
       // Cerrar la ventana del minijuego
       window.close();
     } else {
@@ -195,14 +218,11 @@ async function sendMinigameResult(roomCode, won) {
 }
 
 // Ejemplo de uso
-const urlParams = new URLSearchParams(window.location.search);
-const roomCode = urlParams.get('room');
-
 // Cuando el jugador gana
-sendMinigameResult(roomCode, true);
+sendMinigameResult(true);
 
 // Cuando el jugador pierde
-sendMinigameResult(roomCode, false);
+sendMinigameResult(false);
 ```
 
 ---
@@ -213,12 +233,12 @@ sendMinigameResult(roomCode, false);
 # Enviar resultado de victoria
 curl -X POST http://localhost:2567/minigame/result \
   -H "Content-Type: application/json" \
-  -d '{"roomCode": "ABCD", "won": true}'
+  -d '{"won": true, "roomCode": "ABCD"}'
 
 # Enviar resultado de derrota
 curl -X POST http://localhost:2567/minigame/result \
   -H "Content-Type: application/json" \
-  -d '{"roomCode": "ABCD", "won": false}'
+  -d '{"won": false, "roomCode": "ABCD"}'
 
 # Consultar estado de sesión
 curl http://localhost:2567/minigame/status/mg_1234567890_abc123def

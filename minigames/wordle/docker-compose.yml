@@ -1,0 +1,43 @@
+version: "3.8"
+
+services:
+  # --- SERVIDOR ---
+  wordle-server:
+    build:
+      context: ./wordle-server  # Entra en la carpeta del server
+      dockerfile: Dockerfile
+    container_name: wordle-server
+    ports:
+      - "1234:1234"             # Puerto Host : Puerto Contenedor
+    volumes:
+      - ./wordle-server/src:/app/src  # Hot Reload para cambios en vivo
+      - /app/node_modules       # Evita borrar node_modules del contenedor
+    networks:
+      - wordle-net
+    restart: unless-stopped
+
+  # --- CLIENTE ---
+  wordle-client:
+    build:
+      context: ./wordle-client  # Entra en la carpeta del cliente
+      dockerfile: Dockerfile
+    container_name: wordle-client
+    environment:
+      - VITE_API_URL=http://localhost:1234 # URL pública para que el navegador del usuario llegue al server
+      - CHOKIDAR_USEPOLLING=true # A veces necesario en Windows para que detecte cambios
+    ports:
+      - "1000:1000"             # Puerto Host : Puerto Contenedor
+    depends_on:
+      - wordle-server
+    volumes:
+      - ./wordle-client/src:/app/src   # Hot Reload para cambios en vivo
+      - ./wordle-client/public:/app/public
+      - /app/node_modules        # Evita borrar node_modules del contenedor
+    networks:
+      - wordle-net
+    restart: unless-stopped
+
+# Definición de la red para que se vean entre ellos si fuera necesario
+networks:
+  wordle-net:
+    driver: bridge

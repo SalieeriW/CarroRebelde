@@ -1,0 +1,59 @@
+version: '3.8'
+
+services:
+  server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    ports:
+      - "3002:3002"
+    environment:
+      - PORT=3002
+      - DEFAULT_ROOM_CODE=GOMOKU1
+    volumes:
+      - ./server/src:/app/src
+    command: npm run dev
+    networks:
+      - gomoku-network
+
+  client-a:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+    ports:
+      - "6001:6001"
+    environment:
+      - VITE_API_URL=http://localhost:3002
+      - VITE_ROOM_CODE=GOMOKU1
+      - VITE_DEFAULT_ROLE=A
+      - VITE_PORT=6001
+    volumes:
+      - ./client/src:/app/src
+    depends_on:
+      - server
+    command: npm run dev
+    networks:
+      - gomoku-network
+
+  client-b:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+    ports:
+      - "6002:6002"
+    environment:
+      - VITE_API_URL=http://localhost:3002
+      - VITE_ROOM_CODE=GOMOKU1
+      - VITE_DEFAULT_ROLE=B
+      - VITE_PORT=6002
+    volumes:
+      - ./client/src:/app/src
+    depends_on:
+      - server
+    command: npm run dev -- --port 6002
+    networks:
+      - gomoku-network
+
+networks:
+  gomoku-network:
+    driver: bridge

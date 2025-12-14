@@ -1,0 +1,374 @@
+/* ==================== WORDLE EXACTO ==================== */
+
+@import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+
+.wordle-game {
+  width: 100vw;
+  height: 100vh;
+  background: #16213e;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  padding: 30px 20px;
+  font-family: 'Press Start 2P', monospace;
+  overflow: hidden;
+}
+
+.wordle-header {
+  text-align: center;
+  margin-bottom: 30px;
+  padding-bottom: 20px;
+  border-bottom: 2px solid #2a3f5f;
+  width: 100%;
+  max-width: 450px;
+}
+
+.wordle-title {
+  font-size: 24px;
+  color: #f9d71c;
+  margin: 0;
+  letter-spacing: 3px;
+  text-shadow: 2px 2px 0 rgba(0, 0, 0, 0.5);
+}
+
+.wordle-board {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 40px;
+}
+
+.wordle-row {
+  display: flex;
+  gap: 10px;
+    max-width: 90vw; 
+  overflow-x: auto;
+}
+
+.wordle-row.shake {
+  animation: shake 0.5s;
+}
+
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  10%, 30%, 50%, 70%, 90% { transform: translateX(-10px); }
+  20%, 40%, 60%, 80% { transform: translateX(10px); }
+}
+
+@media (max-width: 1200px) {
+  .wordle-row:has(.wordle-cell:nth-child(8)) .wordle-cell {
+    width: 60px;
+    height: 60px;
+  }
+  
+  .wordle-row:has(.wordle-cell:nth-child(8)) .letter {
+    font-size: 30px;
+  }
+}
+
+/* Para palabras muy largas (más de 10 letras) */
+@media (max-width: 1200px) {
+  .wordle-row:has(.wordle-cell:nth-child(11)) .wordle-cell {
+    width: 50px;
+    height: 50px;
+  }
+  
+  .wordle-row:has(.wordle-cell:nth-child(11)) .letter {
+    font-size: 24px;
+  }
+}
+
+.wordle-cell {
+  width: 80px;
+  height: 80px;
+  border: 4px solid #ffffff;
+  background: #16213e;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  box-sizing: border-box;
+}
+
+.wordle-cell .letter {
+  font-size: 40px;
+  color: #ffffff;
+  font-weight: bold;
+  text-transform: uppercase;
+  line-height: 1;
+}
+
+.wordle-cell.filled {
+  background: #5a5a5a;
+}
+
+.wordle-cell.filled .letter {
+  color: #ffffff;
+}
+
+/* Letra correcta en posición correcta - VERDE */
+.wordle-cell.correct {
+  background: #00ff00;
+  border-color: #00ff00;
+  animation: flip 0.6s ease;
+}
+
+.wordle-cell.correct .letter {
+  color: #000000;
+}
+
+/* Letra correcta en posición incorrecta - AMARILLO */
+.wordle-cell.present {
+  background: #f9d71c;
+  border-color: #f9d71c;
+  animation: flip 0.6s ease;
+}
+
+.wordle-cell.present .letter {
+  color: #000000;
+}
+
+/* Letra incorrecta - GRIS */
+.wordle-cell.absent {
+  background: #5a5a5a;
+  border-color: #5a5a5a;
+  animation: flip 0.6s ease;
+}
+
+.wordle-cell.absent .letter {
+  color: #9a9a9a;
+}
+
+@keyframes pop {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.08); }
+  100% { transform: scale(1); }
+}
+
+@keyframes flip {
+  0% {
+    transform: rotateX(0);
+    background: #16213e;
+  }
+  45% {
+    transform: rotateX(90deg);
+    background: #16213e;
+  }
+  55% {
+    transform: rotateX(90deg);
+  }
+  100% {
+    transform: rotateX(0);
+  }
+}
+
+.wordle-footer {
+  text-align: center;
+  max-width: 450px;
+}
+
+.wordle-instruction {
+  font-size: 12px;
+  color: #00ff00;
+  line-height: 2;
+  margin: 0;
+  text-shadow: 1px 1px 0 rgba(0, 0, 0, 0.5);
+}
+
+.wordle-toast {
+  position: fixed;
+  top: 120px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #f9d71c;
+  color: #000000;
+  padding: 20px 40px;
+  font-size: 14px;
+  border: 3px solid #000000;
+  animation: slideDown 0.3s ease;
+  z-index: 1000;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.5);
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -30px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
+.wordle-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.95);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+  animation: fadeIn 0.5s ease;
+}
+
+.wordle-result {
+  background: #16213e;
+  border: 5px solid #00ff00;
+  padding: 50px;
+  text-align: center;
+  animation: zoomIn 0.6s ease;
+  box-shadow: 0 0 30px rgba(0, 255, 0, 0.3);
+}
+
+.wordle-result h2 {
+  font-size: 28px;
+  color: #00ff00;
+  margin: 0 0 30px 0;
+  text-shadow: 2px 2px 0 rgba(0, 0, 0, 0.5);
+  letter-spacing: 2px;
+}
+
+.wordle-result p {
+  font-size: 14px;
+  color: #ffffff;
+  margin: 15px 0;
+  line-height: 2;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes zoomIn {
+  from {
+    transform: scale(0.7);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+/* Responsive */
+@media (max-width: 700px) {
+  .wordle-cell {
+    width: 65px;
+    height: 65px;
+    border-width: 3px;
+  }
+  
+  .wordle-cell .letter {
+    font-size: 32px;
+  }
+  
+  .wordle-title {
+    font-size: 18px;
+  }
+  
+  .wordle-instruction {
+    font-size: 10px;
+  }
+  
+  .wordle-result {
+    padding: 35px;
+  }
+  
+  .wordle-result h2 {
+    font-size: 20px;
+  }
+  
+  .wordle-result p {
+    font-size: 11px;
+  }
+}
+
+@media (max-width: 500px) {
+  .wordle-cell {
+    width: 55px;
+    height: 55px;
+    border-width: 3px;
+    gap: 8px;
+  }
+  
+  .wordle-row {
+    gap: 8px;
+  }
+  
+  .wordle-board {
+    gap: 8px;
+  }
+  
+  .wordle-cell .letter {
+    font-size: 26px;
+  }
+  
+  .wordle-title {
+    font-size: 14px;
+  }
+  
+  .wordle-instruction {
+    font-size: 8px;
+  }
+}
+
+@media (max-width: 400px) {
+  .wordle-cell {
+    width: 48px;
+    height: 48px;
+    border-width: 2px;
+  }
+  
+  .wordle-row {
+    gap: 6px;
+  }
+  
+  .wordle-board {
+    gap: 6px;
+  }
+  
+  .wordle-cell .letter {
+    font-size: 22px;
+  }
+  
+  .wordle-title {
+    font-size: 12px;
+  }
+}
+
+.solution-box {
+    margin: 20px 0;
+    padding: 15px;
+    background: rgba(255, 0, 0, 0.1);
+    border: 1px solid #ff4444;
+    border-radius: 8px;
+    animation: fadeIn 0.5s ease;
+}
+
+.solution-box p {
+    margin: 0;
+    font-size: 0.9rem;
+    color: #ffaaaa;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.highlight-danger {
+    margin: 10px 0 0 0;
+    font-size: 2rem;
+    color: #ff4444; /* Rojo intenso */
+    text-shadow: 0 0 10px rgba(255, 68, 68, 0.5);
+    letter-spacing: 4px;
+    font-family: 'Courier New', monospace; /* O tu fuente retro */
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(-10px); }
+    to { opacity: 1; transform: translateY(0); }
+}

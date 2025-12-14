@@ -166,25 +166,114 @@ export class GameRoom extends Room<GameState> {
         });
 
         // Cone collision - trigger minigame for ALL players
-        this.onMessage("cone_hit", (client, data) => {
+        this.onMessage("cone_hit", async (client, data) => {
             const player = this.state.players.get(client.sessionId);
             if (player && player.role === "driver" && !this.state.minigameActive) {
+                // Get list of played minigames
+                let playedMinigames: string[] = [];
+                try {
+                    playedMinigames = JSON.parse(this.state.playedMinigames || "[]");
+                } catch (e) {
+                    playedMinigames = [];
+                }
+                
+                // Available minigames
+                const availableMinigames = ["two-keys-gate", "gomoku-duel", "pictionary", "wordle", "coop-miner"];
+                
+                // Find a minigame that hasn't been played yet
+                const unplayedMinigames = availableMinigames.filter(mg => !playedMinigames.includes(mg));
+                
+                if (unplayedMinigames.length === 0) {
+                    // All minigames have been played - just stop the car
+                    console.log("🎮 All minigames have been played - stopping car without minigame");
+                    this.state.car.speed = 0;
+                    return;
+                }
+                
+                // Select a random unplayed minigame
+                const selectedMinigame = unplayedMinigames[Math.floor(Math.random() * unplayedMinigames.length)];
+                
+                if (!selectedMinigame) {
+                    console.warn("⚠️ No minigame selected - this should not happen");
+                    this.state.car.speed = 0;
+                    return;
+                }
+                
+                console.log(`🎮 Selected minigame: ${selectedMinigame} (unplayed: ${unplayedMinigames.join(", ")})`);
+                
+                // RESET the minigame room state BEFORE starting a new minigame
+                try {
+                    let minigameApiUrl: string;
+                    let resetPath: string;
+                    
+                    if (selectedMinigame === "two-keys-gate") {
+                        minigameApiUrl = process.env.MINIGAME_API_URL || 'http://localhost:3001';
+                        resetPath = `/rooms/${this.roomCode}/reset`;
+                    } else if (selectedMinigame === "gomoku-duel") {
+                        minigameApiUrl = process.env.GOMOKU_API_URL || 'http://localhost:3002';
+                        resetPath = `/rooms/${this.roomCode}/reset-public`;
+                    } else if (selectedMinigame === "pictionary") {
+                        minigameApiUrl = process.env.PICTIONARY_API_URL || 'http://localhost:2234';
+                        resetPath = `/api/pictionary/reset/${this.roomCode}`;
+                    } else if (selectedMinigame === "wordle") {
+                        minigameApiUrl = process.env.WORDLE_API_URL || 'http://localhost:1234';
+                        resetPath = `/api/wordle/reset/${this.roomCode}`;
+                    } else if (selectedMinigame === "coop-miner") {
+                        minigameApiUrl = process.env.COOP_MINER_API_URL || 'http://localhost:7001';
+                        resetPath = `/rooms/${this.roomCode}/reset`;
+                    } else {
+                        throw new Error(`Unknown minigame type: ${selectedMinigame}`);
+                    }
+                    
+                    const url = new URL(`${minigameApiUrl}${resetPath}`);
+                    
+                    const postData = '';
+                    const port = url.port ? parseInt(url.port, 10) : (url.protocol === 'https:' ? 443 : 80);
+                    const options = {
+                        hostname: url.hostname,
+                        port: port,
+                        path: url.pathname,
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Content-Length': Buffer.byteLength(postData)
+                        }
+                    };
+
+                    await new Promise<void>((resolve) => {
+                        const http = require('http');
+                        const req = http.request(options, (res: any) => {
+                            console.log(`🔄 Reset ${selectedMinigame} room: ${this.roomCode} (status: ${res.statusCode})`);
+                            res.on('data', () => {}); // Consume response
+                            res.on('end', () => resolve());
+                        });
+
+                        req.on('error', (error: any) => {
+                            console.warn(`⚠️ Error resetting ${selectedMinigame} room: ${this.roomCode}`, error.message);
+                            resolve(); // Continue anyway
+                        });
+
+                        req.write(postData);
+                        req.end();
+                    });
+                } catch (error) {
+                    console.warn(`⚠️ Error resetting ${selectedMinigame} room: ${this.roomCode}`, error);
+                    // Continue anyway - the minigame will still work
+                }
+                
+                // Mark this minigame as played
+                playedMinigames.push(selectedMinigame);
+                this.state.playedMinigames = JSON.stringify(playedMinigames);
+                
                 // Start minigame
                 const sessionId = `mg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
                 this.state.minigameActive = true;
                 this.state.minigameSessionId = sessionId;
+                this.state.minigameType = selectedMinigame;
                 this.state.minigameResult = "pending";
                 
                 // Stop the car
                 this.state.car.speed = 0;
-                
-                // DUMMY: Auto-resolve after 3 seconds - ALWAYS WIN for testing
-                setTimeout(() => {
-                    if (this.state.minigameActive && this.state.minigameSessionId === sessionId) {
-                        console.log("🎮 Auto-resolving minigame...");
-                        this.resolveMinigame(true); // Always win for testing
-                    }
-                }, 3000);
             }
         });
 
@@ -546,6 +635,17 @@ export class GameRoom extends Room<GameState> {
         // Remove room from global map
         if ((global as any).activeRooms) {
             (global as any).activeRooms.delete(this.roomId);
+        }
+        
+        // Remove room from roomsByCode map
+        if ((global as any).roomsByCode) {
+            (global as any).roomsByCode.delete(this.roomCode);
+        }
+        
+        // Clean up any pending assignments for this room
+        if ((global as any).pendingAssignments) {
+            (global as any).pendingAssignments.delete(this.roomId);
+            console.log(`🧹 Cleaned up pending assignments for room ${this.roomId}`);
         }
     }
 

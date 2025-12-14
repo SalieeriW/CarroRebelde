@@ -1,0 +1,57 @@
+{
+  "levels": [
+    {
+      "id": 1,
+      "name": "Bosque",
+      "goalScore": 150,
+      "turns": 20,
+      "objects": [
+        { "type": "piedra", "icon": "🪨", "value": 8, "weight": "heavy", "size": "large", "count": 12 },
+        { "type": "cristal", "icon": "🍃", "value": 25, "weight": "medium", "size": "medium", "count": 8 },
+        { "type": "cofre", "icon": "💰", "value": 50, "weight": "heavy", "size": "small", "spread": 10, "count": 3 },
+        { "type": "hongo", "icon": "🍄", "value": 15, "weight": "light", "size": "medium", "count": 5 }
+      ],
+      "hints": {
+        "generic": "Cristales y hongos son rápidos; los cofres pesan más.",
+        "specific": "Lo brillante no siempre es lo más eficiente.",
+        "step": "Coordinen: A apunta, B prioriza cristales y hongos."
+      }
+    },
+    {
+      "id": 2,
+      "name": "Cinturón estelar",
+      "goalScore": 200,
+      "turns": 22,
+      "objects": [
+        { "type": "meteorito", "icon": "🪐", "value": -10, "weight": "very_heavy", "size": "large", "special": "slow", "count": 6 },
+        { "type": "nucleo", "icon": "⭐", "value": 20, "weight": "light", "size": "medium", "count": 10 },
+        { "type": "diamante", "icon": "💎", "value": 60, "weight": "very_heavy", "size": "small", "count": 3 },
+        { "type": "plasma", "icon": "⚡", "value": 10, "weight": "light", "size": "small", "special": "speed_buff", "count": 4 },
+        { "type": "fragmento", "icon": "🛰️", "value": 15, "weight": "light", "size": "medium", "count": 8 }
+      ],
+      "hints": {
+        "generic": "Eviten meteoritos, plasma acelera, diamantes son lentos.",
+        "specific": "Núcleos y fragmentos suman rápido sin frenar el ritmo.",
+        "step": "Tomen plasma antes de piezas pesadas."
+      }
+    },
+    {
+      "id": 3,
+      "name": "Mina de dulces",
+      "goalScore": 180,
+      "turns": 20,
+      "objects": [
+        { "type": "paleta", "icon": "🍭", "value": 15, "weight": "light", "size": "large", "count": 10 },
+        { "type": "arcoiris", "icon": "🍬", "value": 25, "weight": "light", "size": "medium", "special": "combo", "count": 8 },
+        { "type": "chocolate", "icon": "🍫", "value": 40, "weight": "heavy", "size": "small", "count": 4 },
+        { "type": "gelatina", "icon": "🧃", "value": 10, "weight": "medium", "size": "large", "special": "next_bonus", "count": 5 },
+        { "type": "caja", "icon": "🎁", "value": 50, "weight": "heavy", "size": "small", "count": 3 }
+      ],
+      "hints": {
+        "generic": "Encadenen dulces arcoíris, usen gelatina para bonus.",
+        "specific": "Chocolate y cajas son valiosas pero frenan.",
+        "step": "Construyan combo con arcoíris y paletas de relleno."
+      }
+    }
+  ]
+}

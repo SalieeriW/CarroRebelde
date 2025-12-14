@@ -5,9 +5,10 @@ interface AudioSystemProps {
     radioStation: string;
     turboActive: boolean;
     bgmEnabled?: boolean; // New prop for BGM toggle
+    minigameActive?: boolean; // Disable audio during minigame
 }
 
-export const AudioSystem = forwardRef<any, AudioSystemProps>(({ hornActive, radioStation, turboActive, bgmEnabled = true }, ref) => {
+export const AudioSystem = forwardRef<any, AudioSystemProps>(({ hornActive, radioStation, turboActive, bgmEnabled = true, minigameActive = false }, ref) => {
     const hornAudioRef = useRef<HTMLAudioElement | null>(null);
     const bgmAudioRef = useRef<HTMLAudioElement | null>(null);
     const hornIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -58,13 +59,13 @@ export const AudioSystem = forwardRef<any, AudioSystemProps>(({ hornActive, radi
         }
     };
 
-    // Horn effect - play claxon when active
+    // Horn effect - play claxon when active (but not during minigame)
     useEffect(() => {
-        if (hornActive) {
+        if (hornActive && !minigameActive) {
             playHornSound();
             // Repeat claxon sound while active
             hornIntervalRef.current = setInterval(() => {
-                if (hornActive) {
+                if (hornActive && !minigameActive) {
                     playHornSound();
                 }
             }, 500); // Repeat every 500ms
@@ -79,14 +80,18 @@ export const AudioSystem = forwardRef<any, AudioSystemProps>(({ hornActive, radi
                 clearInterval(hornIntervalRef.current);
                 hornIntervalRef.current = null;
             }
+            // Pause horn audio if minigame is active
+            if (minigameActive && hornAudioRef.current) {
+                hornAudioRef.current.pause();
+            }
         }
-    }, [hornActive]);
+    }, [hornActive, minigameActive]);
 
-    // BGM effect - play bgm.mp3 when radio is not "normal" and BGM is enabled
+    // BGM effect - play bgm.mp3 when radio is not "normal" and BGM is enabled (but not during minigame)
     useEffect(() => {
         if (!bgmAudioRef.current) return;
 
-        const shouldPlay = bgmEnabled && radioStation !== "normal";
+        const shouldPlay = bgmEnabled && radioStation !== "normal" && !minigameActive;
 
         if (shouldPlay) {
             bgmAudioRef.current.play().catch(err => {
@@ -94,9 +99,12 @@ export const AudioSystem = forwardRef<any, AudioSystemProps>(({ hornActive, radi
             });
         } else {
             bgmAudioRef.current.pause();
-            bgmAudioRef.current.currentTime = 0; // Reset to start when paused
+            // Don't reset currentTime if minigame is active (so it can resume where it left off)
+            if (!minigameActive) {
+                bgmAudioRef.current.currentTime = 0; // Reset to start when paused
+            }
         }
-    }, [radioStation, bgmEnabled]);
+    }, [radioStation, bgmEnabled, minigameActive]);
 
     // Turbo effect (keep existing synthetic sound or remove)
     useEffect(() => {

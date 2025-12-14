@@ -1,0 +1,196 @@
+version: "3.8"
+
+services:
+  # Main game server
+  blindrally-server:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    container_name: blindrally-server
+    ports:
+      - "2567:2567"
+    networks:
+      - blindrally-net
+    volumes:
+      - ./server/data:/app/data
+    restart: unless-stopped
+    environment:
+      - PORT=2567
+
+  # Main game client
+  blindrally-client:
+    build:
+      context: .
+      dockerfile: client/Dockerfile
+    container_name: blindrally-client
+    ports:
+      - "5173:5173"
+    depends_on:
+      - blindrally-server
+    networks:
+      - blindrally-net
+    restart: unless-stopped
+    environment:
+      - VITE_SERVER_URL=http://localhost:2567
+      - PORT=5173
+
+  # Minigame server
+  twokeys-server:
+    build:
+      context: ./minigames/two-keys-gate
+      dockerfile: server/Dockerfile
+    container_name: twokeys-server
+    ports:
+      - "3001:3001"
+    networks:
+      - blindrally-net
+    restart: unless-stopped
+    environment:
+      - PORT=3001
+
+  # Minigame client (single instance, players share via URL params)
+  twokeys-client:
+    build:
+      context: ./minigames/two-keys-gate
+      dockerfile: client/Dockerfile
+    container_name: twokeys-client
+    ports:
+      - "5174:5174"
+    depends_on:
+      - twokeys-server
+    networks:
+      - blindrally-net
+    restart: unless-stopped
+    environment:
+      - PORT=5174
+      - VITE_API_URL=http://localhost:3001
+
+  # Gomoku-duel minigame server
+  gomoku-server:
+    build:
+      context: ./minigames/gomoku-duel
+      dockerfile: server/Dockerfile
+    container_name: gomoku-server
+    ports:
+      - "3002:3002"
+    networks:
+      - blindrally-net
+    restart: unless-stopped
+    environment:
+      - PORT=3002
+      - DEFAULT_ROOM_CODE=GOMOKU1
+
+  # Gomoku-duel minigame client
+  gomoku-client:
+    build:
+      context: ./minigames/gomoku-duel
+      dockerfile: client/Dockerfile
+    container_name: gomoku-client
+    ports:
+      - "5175:5175"
+    depends_on:
+      - gomoku-server
+    networks:
+      - blindrally-net
+    restart: unless-stopped
+    environment:
+      - PORT=5175
+      - VITE_API_URL=http://localhost:3002
+
+  # Pictionary minigame server
+  pictionary-server:
+    build:
+      context: ./minigames/pictionary
+      dockerfile: pictionary-server/Dockerfile
+    container_name: pictionary-server
+    ports:
+      - "2234:2234"
+    networks:
+      - blindrally-net
+    restart: unless-stopped
+    environment:
+      - PORT=2234
+
+  # Pictionary minigame client
+  pictionary-client:
+    build:
+      context: ./minigames/pictionary
+      dockerfile: pictionary-client/Dockerfile
+    container_name: pictionary-client
+    ports:
+      - "2000:2000"
+    depends_on:
+      - pictionary-server
+    networks:
+      - blindrally-net
+    restart: unless-stopped
+    environment:
+      - PORT=2000
+      - VITE_API_URL=http://localhost:2234
+
+  # Wordle minigame server
+  wordle-server:
+    build:
+      context: ./minigames/wordle
+      dockerfile: wordle-server/Dockerfile
+    container_name: wordle-server
+    ports:
+      - "1234:1234"
+    networks:
+      - blindrally-net
+    restart: unless-stopped
+    environment:
+      - PORT=1234
+
+  # Wordle minigame client
+  wordle-client:
+    build:
+      context: ./minigames/wordle
+      dockerfile: wordle-client/Dockerfile
+    container_name: wordle-client
+    ports:
+      - "1000:1000"
+    depends_on:
+      - wordle-server
+    networks:
+      - blindrally-net
+    restart: unless-stopped
+    environment:
+      - PORT=1000
+      - VITE_API_URL=http://localhost:1234
+
+  # Coop-miner minigame server
+  coop-miner-server:
+    build:
+      context: ./minigames/coop-miner
+      dockerfile: server/Dockerfile
+    container_name: coop-miner-server
+    ports:
+      - "7001:7001"
+    networks:
+      - blindrally-net
+    restart: unless-stopped
+    environment:
+      - PORT=7001
+
+  # Coop-miner minigame client
+  coop-miner-client:
+    build:
+      context: ./minigames/coop-miner
+      dockerfile: client/Dockerfile
+    container_name: coop-miner-client
+    ports:
+      - "7084:7084"
+    depends_on:
+      - coop-miner-server
+    networks:
+      - blindrally-net
+    restart: unless-stopped
+    environment:
+      - PORT=7084
+      - VITE_API_URL=http://localhost:7001
+
+networks:
+  blindrally-net:
+    driver: bridge
+

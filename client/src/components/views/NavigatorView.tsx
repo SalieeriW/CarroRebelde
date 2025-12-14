@@ -3,7 +3,6 @@ import { useEffect, useRef, useCallback, useState, type MouseEvent as ReactMouse
 interface NavigatorViewProps {
     carPosition: { x: number; z: number; angle: number };
     traps: any[];
-    challengePortal: { x: number; z: number; active: boolean };
     pathHistory: Array<{ x: number; z: number }>;
     startPoint: { x: number; z: number };
     endPoint: { x: number; z: number };

@@ -1,7 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import * as Colyseus from "colyseus.js";
 import { GameState } from "./schema/GameState";
-import { DrawingCanvas } from "./components/DrawingCanvas";
 import { AudioSystem } from "./components/AudioSystem";
 import { AudioChat } from "./components/AudioChat";
 import { Lobby } from "./components/Lobby";
@@ -14,19 +13,22 @@ import "./Game.css";
 const getServerURL = () => {
   // Check if we're in development or production
   if (import.meta.env.VITE_SERVER_URL) {
-    return import.meta.env.VITE_SERVER_URL.replace('http://', 'ws://').replace('https://', 'wss://');
+    const url = import.meta.env.VITE_SERVER_URL.replace('http://', 'ws://').replace('https://', 'wss://');
+    // Replace Docker service names with localhost for browser access
+    return url.replace(/ws:\/\/blindrally-server/, 'ws://localhost').replace(/wss:\/\/blindrally-server/, 'wss://localhost');
   }
   
   // Try to detect if we're accessing from a mobile device or different host
   const hostname = window.location.hostname;
   
-  // If not localhost, assume we're accessing from network and use the same hostname
-  if (hostname !== 'localhost' && hostname !== '127.0.0.1') {
-    return `ws://${hostname}:2567`;
+  // Always use localhost or the actual hostname (never Docker service names)
+  // Docker service names like "blindrally-server" won't work in browser
+  if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === 'blindrally-server') {
+    return "ws://localhost:2567";
   }
   
-  // Default to localhost for local development
-  return "ws://localhost:2567";
+  // If accessing from network, use the actual hostname
+  return `ws://${hostname}:2567`;
 };
 
 const client = new Colyseus.Client(getServerURL());
@@ -46,8 +48,6 @@ export const Game = ({ preassignedRoom }: GameProps) => {
     type TrapDTO = { id: string; x: number; z: number; type: string; radius: number };
     const [traps, setTraps] = useState<TrapDTO[]>([]);
     const [gamePhase, setGamePhase] = useState<string>("lobby");
-    const [challenge, setChallenge] = useState<any>(null);
-    const [challengePortal, setChallengePortal] = useState<{ x: number, z: number, active: boolean }>({ x: 0, z: 0, active: false });
     const [carState, setCarState] = useState<any>({});
     const [radioStation, setRadioStation] = useState("normal");
     const [hornActive, setHornActive] = useState(false);
@@ -71,10 +71,10 @@ export const Game = ({ preassignedRoom }: GameProps) => {
     const [minigameActive, setMinigameActive] = useState(false);
     const [minigameSessionId, setMinigameSessionId] = useState("");
     const [minigameResult, setMinigameResult] = useState("");
+    const [minigameType, setMinigameType] = useState("");
     const [clarityActive, setClarityActive] = useState(false);
     const [speedBoostActive, setSpeedBoostActive] = useState(false);
     const minigameWindowRef = useRef<Window | null>(null);
-    const minigamePollingRef = useRef<NodeJS.Timeout | null>(null);
 
     // If role hasn't arrived yet (common right after creating the room), poll briefly to avoid rendering "nothing".
     useEffect(() => {
@@ -103,16 +103,68 @@ export const Game = ({ preassignedRoom }: GameProps) => {
 
     // Handle minigame - open window for BOTH players (cooperative minigame)
     useEffect(() => {
-        if (minigameActive && minigameSessionId && myRole) {
+        if (minigameActive && minigameSessionId && minigameType && myRole) {
             // Open minigame in new tab for BOTH driver and navigator
-            const minigameUrl = `/minigame.html?session=${minigameSessionId}&room=${roomCode}&role=${myRole}`;
+            const hostname = window.location.hostname;
+            
+            // Determine port and URL based on minigame type
+            let minigamePort: string;
+            if (minigameType === "two-keys-gate") {
+                minigamePort = "5174";
+            } else if (minigameType === "gomoku-duel") {
+                minigamePort = "5175";
+            } else if (minigameType === "pictionary") {
+                minigamePort = "2000";
+            } else if (minigameType === "wordle") {
+                minigamePort = "1000";
+            } else if (minigameType === "coop-miner") {
+                minigamePort = "7084";
+            } else {
+                console.warn(`Unknown minigame type: ${minigameType}`);
+                return;
+            }
+            
+            const minigameUrl = `http://${hostname}:${minigamePort}?room=${roomCode}&session=${minigameSessionId}&role=${myRole}`;
+            console.log(`🎮 [Minigame] Attempting to open ${minigameType} at ${minigameUrl}`, {
+                minigameActive,
+                minigameSessionId,
+                minigameType,
+                myRole,
+                roomCode,
+                hostname
+            });
+            
             if (!minigameWindowRef.current || minigameWindowRef.current.closed) {
-                console.log(`Opening minigame for ${myRole}:`, minigameUrl);
-                minigameWindowRef.current = window.open(minigameUrl, '_blank');
+                try {
+                    const newWindow = window.open(minigameUrl, '_blank');
+                    if (newWindow) {
+                        minigameWindowRef.current = newWindow;
+                        console.log(`✅ Successfully opened ${minigameType} window`);
+                    } else {
+                        console.error(`❌ Failed to open ${minigameType} window - popup blocked?`);
+                        alert(`Please allow popups for this site to play ${minigameType}`);
+                    }
+                } catch (error) {
+                    console.error(`❌ Error opening ${minigameType} window:`, error);
+                }
+            } else {
+                console.log(`ℹ️ ${minigameType} window already open`);
             }
         }
-        // Window will close itself when minigame ends
-    }, [minigameActive, minigameSessionId, myRole, roomCode]);
+    }, [minigameActive, minigameSessionId, minigameType, myRole, roomCode]);
+
+    // Close minigame window when minigame ends
+    useEffect(() => {
+        if (!minigameActive && minigameWindowRef.current && !minigameWindowRef.current.closed) {
+            console.log(`🔒 Closing minigame window (minigame ended)`);
+            try {
+                minigameWindowRef.current.close();
+            } catch (error) {
+                console.warn(`⚠️ Could not close minigame window:`, error);
+            }
+            minigameWindowRef.current = null;
+        }
+    }, [minigameActive]);
 
     const setupRoomListeners = useCallback((r: Colyseus.Room<GameState>) => {
         // Ensure we always store the session id we should look up in state.players
@@ -125,7 +177,6 @@ export const Game = ({ preassignedRoom }: GameProps) => {
                 return;
             }
             
-            console.log("📊 Updating state:", state.gamePhase, "roomCode:", state.roomCode, "trackData:", state.trackData?.length || 0, "chars");
             setGamePhase(state.gamePhase || "lobby");
             setRoomCode(state.roomCode || "");
             
@@ -195,19 +246,6 @@ export const Game = ({ preassignedRoom }: GameProps) => {
                 setTraps(trapArray);
             }
 
-            if (state.challengePortalActive) {
-                setChallengePortal({
-                    x: state.challengePortalX,
-                    z: state.challengePortalZ,
-                    active: true
-                });
-            } else {
-                setChallengePortal({ x: 0, z: 0, active: false });
-            }
-
-            if (state.challenge) {
-                setChallenge(state.challenge);
-            }
 
             setRadioStation(state.radioStation || "normal");
             setHornActive(state.hornActive || false);
@@ -226,6 +264,7 @@ export const Game = ({ preassignedRoom }: GameProps) => {
             setMinigameActive(state.minigameActive || false);
             setMinigameSessionId(state.minigameSessionId || "");
             setMinigameResult(state.minigameResult || "");
+            setMinigameType(state.minigameType || "");
             
             const newClarityActive = state.car?.clarityActive || false;
             const newSpeedBoostActive = state.car?.speedBoostActive || false;
@@ -308,6 +347,10 @@ export const Game = ({ preassignedRoom }: GameProps) => {
 
     const handleJoinRoom = useCallback(async (roomId: string) => {
         try {
+            if (!roomId || roomId.trim() === '') {
+                throw new Error("Room ID is empty or invalid");
+            }
+            
             console.log("🔗 Attempting to join room:", roomId);
             const r = await client.joinById<GameState>(roomId);
             console.log("✅ Joined room", r.sessionId, "State:", r.state?.gamePhase, "Track:", r.state?.trackData?.length);
@@ -315,30 +358,97 @@ export const Game = ({ preassignedRoom }: GameProps) => {
             setMySessionId(r.sessionId);
             setConnected(true);
             setupRoomListeners(r);
-        } catch (e) {
+        } catch (e: any) {
             console.error("❌ Join room error", e);
-            const errorMessage = e instanceof Error 
-                ? e.message 
-                : typeof e === 'string' 
-                    ? e 
-                    : e?.toString?.() || JSON.stringify(e) || "Unknown error";
-            alert("Failed to join room: " + errorMessage);
+            
+            // Extract meaningful error message from various error types
+            let errorMessage = "Unknown error";
+            
+            if (e instanceof Error) {
+                errorMessage = e.message;
+            } else if (typeof e === 'string') {
+                errorMessage = e;
+            } else if (e?.message) {
+                errorMessage = e.message;
+            } else if (e?.error) {
+                errorMessage = e.error;
+            } else if (e?.type === 'error' || e?.type === 'loadend') {
+                // XMLHttpRequestProgressEvent or similar
+                errorMessage = "Connection failed. Check if server is running and room exists.";
+            } else if (e?.target?.status) {
+                // HTTP error response
+                const status = e.target.status;
+                const statusText = e.target.statusText || '';
+                errorMessage = `HTTP ${status}${statusText ? ': ' + statusText : ''}`;
+            } else {
+                // Try to stringify, but handle circular references
+                try {
+                    errorMessage = JSON.stringify(e);
+                } catch {
+                    errorMessage = String(e) || "Unknown error";
+                }
+            }
+            
+            console.error("Error details:", { roomId, error: e, message: errorMessage });
+            
+            // If room not found, don't show alert if it's a preassigned room (will be handled by useEffect)
+            // Only show alert for manual joins
+            if (!errorMessage.includes("not found") || !preassignedRoom) {
+                alert("Failed to join room: " + errorMessage);
+            }
+            
+            // Re-throw to allow caller to handle
+            throw e;
         }
-    }, [setupRoomListeners]);
+    }, [setupRoomListeners, preassignedRoom]);
 
     // Guard to prevent double joining
     const joiningRef = useRef(false);
+    
+    // Cleanup joining state when preassignedRoom changes or component unmounts
+    useEffect(() => {
+        return () => {
+            // Reset joining guard on unmount or when preassignedRoom changes
+            joiningRef.current = false;
+        };
+    }, [preassignedRoom]);
     
     // Auto-join preassigned room if provided (from monitor assignment)
     useEffect(() => {
         if (preassignedRoom && !room && !connected && !joiningRef.current) {
             joiningRef.current = true;
             console.log("🎮 Auto-joining preassigned room:", preassignedRoom);
-            // Join the existing room by its ID (preassignedRoom is the roomId, not code)
-            handleJoinRoom(preassignedRoom).finally(() => {
-                // Reset guard after join completes (success or failure)
-                setTimeout(() => { joiningRef.current = false; }, 1000);
-            });
+            console.log("🎮 Server URL:", getServerURL());
+            console.log("🎮 Client initialized:", !!client);
+            
+            // Small delay to ensure room is ready and server has processed assignment
+            const timeoutId = setTimeout(() => {
+                if (preassignedRoom && preassignedRoom.trim() !== '') {
+                    handleJoinRoom(preassignedRoom).catch((error) => {
+                        console.error("❌ Failed to join preassigned room:", error);
+                        // If room doesn't exist, clear the preassigned room and reset state
+                        // This allows the user to go back to waiting screen
+                        setConnected(false);
+                        setRoom(null);
+                        joiningRef.current = false;
+                    }).finally(() => {
+                        // Reset guard after join completes (success or failure)
+                        setTimeout(() => { joiningRef.current = false; }, 1000);
+                    });
+                } else {
+                    console.error("❌ Invalid roomId:", preassignedRoom);
+                    joiningRef.current = false;
+                }
+            }, 1000);
+            
+            // Cleanup timeout if component unmounts or preassignedRoom changes
+            return () => {
+                clearTimeout(timeoutId);
+                joiningRef.current = false;
+            };
+        } else if (!preassignedRoom && joiningRef.current) {
+            // If preassignedRoom is cleared, reset the joining guard
+            joiningRef.current = false;
         }
     }, [preassignedRoom, room, connected, handleJoinRoom]);
 
@@ -350,7 +460,6 @@ export const Game = ({ preassignedRoom }: GameProps) => {
 
     const handleAccelerate = useCallback((active: boolean) => {
         if (room) {
-            console.log("CLIENT: Sending accelerate:", active);
             room.send("input", { accelerate: active });
         } else {
             console.log("CLIENT: No room, cannot send accelerate");
@@ -379,17 +488,6 @@ export const Game = ({ preassignedRoom }: GameProps) => {
         }
     }, [room, myRole, bgmEnabled]);
 
-    const handleDrawingComplete = useCallback((canvasData: string) => {
-        if (room && challenge && challenge.currentDrawer === mySessionId) {
-            room.send("drawing", { canvasData });
-        }
-    }, [room, challenge, mySessionId]);
-
-    const handleGuess = useCallback((word: string) => {
-        if (room && challenge && challenge.currentGuesser === mySessionId) {
-            room.send("guess", { word });
-        }
-    }, [room, challenge, mySessionId]);
 
     const handleTrackGenerated = useCallback((track: Array<{x: number, y: number}>) => {
         if (room) {
@@ -401,11 +499,27 @@ export const Game = ({ preassignedRoom }: GameProps) => {
     // Handler para cuando el Driver genera los conos/obstáculos
     const handleConesGenerated = useCallback((cones: Array<{x: number, y: number}>) => {
         if (room) {
-            console.log("Sending cones to server:", cones.length);
             const conesJson = JSON.stringify(cones);
             room.send("cones", { conesData: conesJson });
         }
     }, [room]);
+
+    // Timeout to prevent infinite loading when trying to connect to preassigned room
+    useEffect(() => {
+        if (preassignedRoom && !connected && !room) {
+            const timeoutId = setTimeout(() => {
+                if (!connected && !room && joiningRef.current) {
+                    console.warn("⏱️ Connection timeout after 10s - resetting state");
+                    joiningRef.current = false;
+                    // Reset state to allow retry or go back to waiting screen
+                    setConnected(false);
+                    setRoom(null);
+                }
+            }, 10000); // 10 second timeout
+            
+            return () => clearTimeout(timeoutId);
+        }
+    }, [preassignedRoom, connected, room]);
 
     // Show main lobby if not connected (only if NOT coming from monitor assignment)
     if (!connected) {
@@ -500,12 +614,6 @@ export const Game = ({ preassignedRoom }: GameProps) => {
         );
     }
 
-    // Show challenge overlay if active
-    const showChallenge = gamePhase === "challenge" && challenge?.active;
-    const isMyTurnToDraw = challenge?.currentDrawer === mySessionId;
-    const isMyTurnToGuess = challenge?.currentGuesser === mySessionId;
-    const showDrawing1 = challenge?.phase === "drawing2" || challenge?.phase === "guessing";
-    const showDrawing2 = challenge?.phase === "guessing";
 
     // Format time as MM:SS.ms
     const formatTime = (ms: number) => {
@@ -524,6 +632,7 @@ export const Game = ({ preassignedRoom }: GameProps) => {
                 radioStation={radioStation}
                 turboActive={carState.turboActive}
                 bgmEnabled={bgmEnabled}
+                minigameActive={minigameActive}
             />
 
             {/* Audio Chat - WebRTC voice chat */}
@@ -683,6 +792,22 @@ export const Game = ({ preassignedRoom }: GameProps) => {
                                 if (room) {
                                     room.leave();
                                 }
+                                // Clear all state and go back to lobby
+                                setRoom(null);
+                                setConnected(false);
+                                setGamePhase("lobby");
+                                setRaceFinished(false);
+                                setMinigameActive(false);
+                                setMinigameSessionId("");
+                                setMinigameResult("");
+                                setMinigameType("");
+                                setRoomCode("");
+                                // Reset all game state
+                                setCarPosition({ x: 0, z: 0, angle: 0 });
+                                setCarSpeed(0);
+                                setSteeringValue(0);
+                                setPathHistory([]);
+                                setTraps([]);
                                 // Reload page to go back to lobby
                                 window.location.reload();
                             }}
@@ -895,7 +1020,6 @@ export const Game = ({ preassignedRoom }: GameProps) => {
                     onCollision={() => {
                         // Send cone_hit to trigger minigame
                         if (room && !minigameActive) {
-                            console.log("🎯 Sending cone_hit to server!");
                             room.send("cone_hit");
                         }
                     }}
@@ -918,7 +1042,6 @@ export const Game = ({ preassignedRoom }: GameProps) => {
                 <NavigatorView
                     carPosition={carPosition}
                     traps={traps}
-                    challengePortal={challengePortal}
                     pathHistory={pathHistory}
                     startPoint={startPoint}
                     endPoint={endPoint}
@@ -934,64 +1057,6 @@ export const Game = ({ preassignedRoom }: GameProps) => {
                 />
             )}
 
-            {/* Challenge Drawing Canvas */}
-            {showChallenge && (
-                <div className="challenge-overlay">
-                    {isMyTurnToDraw && challenge?.phase === "drawing1" && (
-                        <div className="challenge-panel">
-                            <h2>DRAW: {challenge.word}</h2>
-                            <p>12 seconds</p>
-                            <DrawingCanvas
-                                onComplete={handleDrawingComplete}
-                                timeLimit={12000}
-                                showPrevious={false}
-                            />
-                        </div>
-                    )}
-
-                    {isMyTurnToDraw && challenge?.phase === "drawing2" && (
-                        <div className="challenge-panel">
-                            <h2>REINTERPRET</h2>
-                            <p>12 seconds</p>
-                            {showDrawing1 && challenge.drawing1Data && (
-                                <img src={challenge.drawing1Data} alt="Previous" className="previous-drawing" />
-                            )}
-                            <DrawingCanvas
-                                onComplete={handleDrawingComplete}
-                                timeLimit={12000}
-                                showPrevious={true}
-                                previousDrawing={challenge.drawing1Data}
-                            />
-                        </div>
-                    )}
-
-                    {isMyTurnToGuess && challenge?.phase === "guessing" && (
-                        <div className="challenge-panel">
-                            <h2>GUESS</h2>
-                            {showDrawing2 && challenge.drawing2Data && (
-                                <img src={challenge.drawing2Data} alt="Final" className="previous-drawing" />
-                            )}
-                            <input
-                                type="text"
-                                className="pixel-input"
-                                placeholder="Your guess..."
-                                onKeyPress={(e) => {
-                                    if (e.key === "Enter") {
-                                        handleGuess(e.currentTarget.value);
-                                    }
-                                }}
-                                autoFocus
-                            />
-                        </div>
-                    )}
-
-                    {!isMyTurnToDraw && !isMyTurnToGuess && (
-                        <div className="challenge-panel">
-                            <h2>WAITING...</h2>
-                        </div>
-                    )}
-                </div>
-            )}
         </div>
     );
 };

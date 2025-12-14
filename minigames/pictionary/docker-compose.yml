@@ -1,0 +1,42 @@
+version: "3.8"
+
+services:
+  # --- SERVIDOR PICTIONARY ---
+  pictionary-server:
+    build:
+      context: ./pictionary-server
+      dockerfile: Dockerfile
+    container_name: pictionary-server
+    ports:
+      - "2234:2234"             # Puerto Host : Puerto Contenedor
+    volumes:
+      - ./pictionary-server/src:/app/src  # Hot Reload
+      - /app/node_modules       # Protección de node_modules
+    networks:
+      - pictionary-net
+    restart: unless-stopped
+
+  # --- CLIENTE PICTIONARY ---
+  pictionary-client:
+    build:
+      context: ./pictionary-client
+      dockerfile: Dockerfile
+    container_name: pictionary-client
+    environment:
+      - VITE_API_URL=http://localhost:2234 # URL para conectar con el back
+      - CHOKIDAR_USEPOLLING=true # Para asegurar detección de cambios en Windows
+    ports:
+      - "2000:2000"             # Puerto Host : Puerto Contenedor
+    depends_on:
+      - pictionary-server
+    volumes:
+      - ./pictionary-client/src:/app/src   # Hot Reload
+      - ./pictionary-client/index.html:/app/index.html
+      - /app/node_modules
+    networks:
+      - pictionary-net
+    restart: unless-stopped
+
+networks:
+  pictionary-net:
+    driver: bridge

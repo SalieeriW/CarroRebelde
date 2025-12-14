@@ -1,0 +1,66 @@
+{
+  "name": "Duelo de Gomoku",
+  "nameES": "Cinco en Línea",
+  "briefing": {
+    "title": "Bienvenidos al Duelo de Gomoku",
+    "description": "Colaboren para vencer a la Inteligencia Artificial en este juego de estrategia.",
+    "instructions": [
+      "1. Tablero de 15×15 casillas.",
+      "2. Coloquen cinco fichas consecutivas (horizontal, vertical o diagonal) para ganar.",
+      "3. Jugador A tiene el primer turno (mueve primero).",
+      "4. Jugador B tiene el segundo turno (mueve después de A).",
+      "5. Pueden elegir jugar con Negro ● o Blanco ○ en el lobby.",
+      "6. La IA se adaptará y jugará con el color opuesto.",
+      "7. Si la IA juega Negro, hará su primera jugada en el centro.",
+      "8. La IA responde automáticamente después de cada jugada.",
+      "9. Discutan su estrategia usando el chat entre turnos."
+    ],
+    "reminder": "Recuerden: Jugador A mueve primero, Jugador B después. La comunicación es clave para vencer a la IA.",
+    "startButton": "Comenzar Partida"
+  },
+  "rules": {
+    "title": "Reglas del Juego",
+    "boardSize": "15×15",
+    "winCondition": "Cinco fichas en línea",
+    "playerFirst": true,
+    "aiColor": "Blanco (○)",
+    "playerColor": "Negro (●)"
+  },
+  "messages": {
+    "yourTurn": "Tu turno (Negro)",
+    "yourTurnPlayerA": "Turno de Jugador A (Negro) - Primer turno",
+    "yourTurnPlayerB": "Turno de Jugador B (Negro) - Segundo turno",
+    "aiTurn": "Turno de la IA (Blanco)...",
+    "selectCell": "Selecciona una casilla",
+    "confirmMove": "Confirmar jugada",
+    "victory": "¡Victoria!",
+    "victoryMessage": "¡Excelente trabajo! Han derrotado a la IA cooperando juntos.",
+    "defeat": "Derrota",
+    "defeatMessage": "La IA ha ganado esta vez. ¡Inténtenlo de nuevo!",
+    "draw": "Empate",
+    "drawMessage": "El tablero está lleno. Es un empate.",
+    "reset": "Reiniciar",
+    "exit": "Volver",
+    "waitingForPartner": "Esperando al otro jugador...",
+    "bothPlayersReady": "Ambos jugadores listos",
+    "playerLeft": "Tu compañero se ha desconectado.",
+    "playerAFirst": "Jugador A mueve primero",
+    "playerBSecond": "Jugador B mueve después"
+  },
+  "lobby": {
+    "title": "Sala de Espera",
+    "claimSeat": "Tomar asiento",
+    "releaseSeat": "Liberar",
+    "ready": "Estoy listo",
+    "cancelReady": "Cancelar listo",
+    "start": "Comenzar",
+    "waiting": "Esperando a que ambos jugadores estén listos...",
+    "playerA": "Jugador A",
+    "playerB": "Jugador B",
+    "vacant": "Vacante",
+    "you": "Tú",
+    "occupied": "Ocupado",
+    "readyStatus": "✓ LISTO",
+    "waitingStatus": "ESPERANDO"
+  }
+}

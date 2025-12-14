@@ -1,0 +1,28 @@
+{
+  "name": "two-keys-gate",
+  "version": "1.0.0",
+  "description": "La Puerta de Dos Llaves - Cooperative puzzle game module for Xuklis Quest",
+  "type": "module",
+  "scripts": {
+    "test": "echo \"No tests configured yet\" && exit 0"
+  },
+  "keywords": [
+    "game",
+    "cooperative",
+    "puzzle",
+    "colyseus",
+    "react",
+    "serious-game"
+  ],
+  "author": "",
+  "license": "MIT",
+  "peerDependencies": {
+    "@colyseus/schema": "^3.0.70",
+    "colyseus": "^0.16.5",
+    "colyseus.js": "^0.15.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {},
+  "dependencies": {}
+}

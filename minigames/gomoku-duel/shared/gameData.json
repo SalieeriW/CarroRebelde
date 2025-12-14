@@ -1,0 +1,58 @@
+{
+  "name": "Duelo de Gomoku",
+  "nameES": "Cinco en Línea",
+  "briefing": {
+    "title": "Bienvenidos al Duelo de Gomoku",
+    "description": "Colaboren para vencer a la Inteligencia Artificial en este juego de estrategia.",
+    "instructions": [
+      "1. Tablero de 15×15 casillas.",
+      "2. Coloquen cinco fichas consecutivas (horizontal, vertical o diagonal) para ganar.",
+      "3. Los Jugadores (Negro ●) mueven primero.",
+      "4. La IA (Blanco ○) responde automáticamente.",
+      "5. Discutan su estrategia usando el chat."
+    ],
+    "reminder": "Recuerden: La comunicación es clave para vencer a la IA.",
+    "startButton": "Comenzar Partida"
+  },
+  "rules": {
+    "title": "Reglas del Juego",
+    "boardSize": "15×15",
+    "winCondition": "Cinco fichas en línea",
+    "playerFirst": true,
+    "aiColor": "Blanco (○)",
+    "playerColor": "Negro (●)"
+  },
+  "messages": {
+    "yourTurn": "Tu turno (Negro)",
+    "aiTurn": "Turno de la IA (Blanco)...",
+    "selectCell": "Selecciona una casilla",
+    "confirmMove": "Confirmar jugada",
+    "victory": "¡Victoria!",
+    "victoryMessage": "¡Excelente trabajo! Han derrotado a la IA.",
+    "defeat": "Derrota",
+    "defeatMessage": "La IA ha ganado esta vez. ¡Inténtenlo de nuevo!",
+    "draw": "Empate",
+    "drawMessage": "El tablero está lleno. Es un empate.",
+    "reset": "Reiniciar",
+    "exit": "Volver al Tablero",
+    "waitingForPartner": "Esperando al otro jugador...",
+    "bothPlayersReady": "Ambos jugadores listos",
+    "playerLeft": "Tu compañero se ha desconectado."
+  },
+  "lobby": {
+    "title": "Sala de Espera",
+    "claimSeat": "Tomar asiento",
+    "releaseSeat": "Liberar",
+    "ready": "Estoy listo",
+    "cancelReady": "Cancelar listo",
+    "start": "Comenzar",
+    "waiting": "Esperando a que ambos jugadores estén listos...",
+    "playerA": "Jugador A",
+    "playerB": "Jugador B",
+    "vacant": "Vacante",
+    "you": "Tú",
+    "occupied": "Ocupado",
+    "readyStatus": "✓ LISTO",
+    "waitingStatus": "ESPERANDO"
+  }
+}

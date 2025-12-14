@@ -863,52 +863,6 @@ body {
     text-shadow: 1px 1px 0px var(--pixel-black);
 }
 
-/* Challenge Overlay */
-.challenge-overlay {
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100vw;
-    height: 100vh;
-    background: rgba(0, 0, 0, 0.95);
-    z-index: 1000;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-
-.challenge-panel {
-    background: var(--pixel-bg);
-    border: 4px solid var(--pixel-yellow);
-    box-shadow: 
-        inset -3px -3px 0px var(--pixel-black),
-        inset 3px 3px 0px var(--pixel-white),
-        8px 8px 0px var(--pixel-black);
-    padding: 30px;
-    max-width: 900px;
-    width: 90%;
-    text-align: center;
-}
-
-.challenge-panel h2 {
-    font-size: 18px;
-    margin-bottom: 20px;
-    color: var(--pixel-yellow);
-    text-shadow: 2px 2px 0px var(--pixel-black);
-}
-
-.previous-drawing {
-    max-width: 100%;
-    max-height: 300px;
-    border: 3px solid var(--pixel-white);
-    box-shadow: 
-        inset -2px -2px 0px var(--pixel-black),
-        inset 2px 2px 0px var(--pixel-white);
-    border-radius: 0;
-    margin: 20px 0;
-    image-rendering: pixelated;
-}
-
 /* Game Container */
 .game-container {
     width: 100vw;

@@ -29,6 +29,19 @@ const AppContent = () => {
   const [spectatorData, setSpectatorData] = useState<any>(null);
   const [spectatorRoom, setSpectatorRoom] = useState<Colyseus.Room | null>(null);
 
+  // Clear assigned room on mount to prevent reusing old room IDs after game ends
+  useEffect(() => {
+    // Always clear assignedRoom on mount - it should only be set by monitor assignment
+    // If user comes back from a finished game, they should go to waiting screen
+    setAssignedRoom(null);
+    
+    // Also clear any stale state that might prevent new connections
+    return () => {
+      // Cleanup on unmount
+      setAssignedRoom(null);
+    };
+  }, []);
+
   // Handle player assignment
   const handleAssigned = useCallback((roomId: string) => {
     setAssignedRoom(roomId);

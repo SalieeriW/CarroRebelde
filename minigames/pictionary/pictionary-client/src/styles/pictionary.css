@@ -1,0 +1,328 @@
+/* Importar la fuente pixelada que te gusta */
+@import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+
+:root {
+  --bg-dark: #16213e;
+  --bg-panel: #1f2029;
+  --accent-yellow: #f9d71c;
+  --accent-red: #e94560;
+  --accent-green: #2ecc71;
+  --text-white: #ffffff;
+  --border-color: #ffffff;
+}
+
+/* --- LAYOUT GENERAL --- */
+.retro-game {
+  width: 100%;
+  min-height: 100vh;
+  background-color: var(--bg-dark);
+  /* Patrón de fondo sutil tipo scanline */
+  background-image: linear-gradient(rgba(0,0,0,0.1) 50%, transparent 50%);
+  background-size: 100% 4px;
+  
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Press Start 2P', cursive; /* TU FUENTE PREFERIDA */
+  color: var(--text-white);
+  padding: 20px;
+  box-sizing: border-box;
+}
+
+/* --- HEADER Y TEXTOS --- */
+.retro-header {
+  text-align: center;
+  margin-bottom: 20px;
+  width: 100%;
+  max-width: 800px;
+}
+
+.retro-title {
+  font-size: 24px;
+  color: var(--accent-yellow);
+  text-transform: uppercase;
+  margin: 0 0 15px 0;
+  text-shadow: 3px 3px 0 rgba(0, 0, 0, 0.5);
+  letter-spacing: 2px;
+}
+
+.retro-word-box {
+    background: var(--bg-panel);
+    border: 2px solid var(--accent-red);
+    padding: 10px 20px;
+    font-size: 14px;
+    margin-bottom: 10px;
+    display: inline-block;
+    box-shadow: 4px 4px 0 rgba(0,0,0,0.3);
+}
+
+.highlight {
+    color: var(--accent-yellow);
+}
+
+.retro-status {
+  font-size: 12px;
+  color: var(--accent-red);
+  margin-top: 10px;
+  background: rgba(233, 69, 96, 0.1);
+  padding: 5px;
+  border: 2px solid var(--accent-red);
+}
+
+.retro-win-msg {
+    color: var(--accent-green);
+    font-size: 16px;
+    margin-top: 10px;
+    border: 2px dashed var(--accent-green);
+    padding: 10px;
+    text-shadow: 2px 2px 0 #000;
+}
+
+/* --- NUEVO: PALETA DE COLORES --- */
+.retro-palette-container {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 10px;
+    background: var(--bg-panel);
+    padding: 8px;
+    border: 2px solid var(--border-color);
+    box-shadow: 4px 4px 0 rgba(0,0,0,0.3);
+}
+
+.palette-swatch {
+    width: 32px;
+    height: 32px;
+    border: 3px solid #000;
+    cursor: pointer;
+    /* Efecto pixelado para los colores */
+    image-rendering: pixelated; 
+    transition: transform 0.1s;
+}
+
+.palette-swatch:hover {
+     transform: scale(1.1);
+}
+
+/* Swatch activo: borde blanco brillante */
+.palette-swatch.active {
+    border-color: var(--text-white);
+    box-shadow: 0 0 0 2px #000, 0 0 0 4px var(--text-white);
+    z-index: 1;
+}
+
+
+/* --- CANVAS --- */
+/* Mantenemos el borde blanco grueso que te gusta */
+.retro-canvas-container {
+  border: 4px solid var(--border-color);
+  background: var(--bg-dark);
+  box-shadow: 8px 8px 0 rgba(0, 0, 0, 0.5);
+  margin: 5px 0 20px 0;
+  max-width: 100%;
+  overflow: hidden; 
+}
+
+canvas {
+  display: block;
+  touch-action: none;
+}
+
+/* --- CONTROLES E INPUTS --- */
+.retro-controls {
+  display: flex;
+  gap: 15px;
+  width: 100%;
+  max-width: 800px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.retro-input {
+  background: var(--bg-panel);
+  border: 4px solid var(--border-color);
+  color: var(--text-white);
+  padding: 15px;
+  font-family: 'Press Start 2P', cursive;
+  font-size: 12px;
+  text-transform: uppercase;
+  outline: none;
+  flex-grow: 1;
+  max-width: 400px;
+  box-shadow: 4px 4px 0 rgba(0,0,0,0.3);
+}
+
+.retro-input:focus {
+  border-color: var(--accent-yellow);
+}
+
+.retro-btn {
+  background: var(--accent-yellow);
+  border: 4px solid var(--border-color);
+  color: #000;
+  padding: 15px 20px;
+  font-family: 'Press Start 2P', cursive;
+  font-size: 12px;
+  cursor: pointer;
+  text-transform: uppercase;
+  box-shadow: 4px 4px 0 rgba(0,0,0,0.5);
+  transition: all 0.1s;
+}
+
+.retro-btn:active {
+  transform: translate(4px, 4px);
+  box-shadow: 0px 0px 0 rgba(0,0,0,0.5);
+}
+
+.retro-btn.secondary {
+  background: #3498db; /* Azul para botones secundarios */
+  color: var(--text-white);
+}
+
+/* Botón rojo para borrar */
+.retro-btn.danger {
+  background: var(--accent-red);
+  color: var(--text-white);
+}
+.full-width { width: 100%; }
+
+/* --- TARJETA DE MENÚ INICIAL --- */
+.retro-card {
+    background: var(--bg-panel);
+    padding: 25px;
+    border: 4px solid #555;
+    text-align: center;
+    box-shadow: 8px 8px 0 #000;
+    margin-bottom: 20px;
+    max-width: 90%;
+}
+
+.retro-id-box {
+    font-size: 18px;
+    color: var(--accent-yellow);
+    margin: 10px 0;
+    border: 2px dashed var(--accent-yellow);
+    padding: 5px;
+}
+
+.retro-code {
+    display: block;
+    background: #000;
+    padding: 10px;
+    color: var(--accent-green);
+    font-size: 10px;
+    word-break: break-all;
+    margin-top: 5px;
+    border: 2px solid #333;
+}
+
+.label { font-size: 10px; color: #aaa; margin: 0; }
+.label.tiny { margin-top: 15px; }
+
+.footer-hint {
+    margin-top: 40px;
+    font-size: 10px;
+    opacity: 0.7;
+    animation: blink 2s infinite step-start;
+}
+
+/* --- NUEVO: MODAL DE AYUDA (F10) --- */
+.retro-modal-overlay {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(0,0,0,0.85); /* Fondo oscuro */
+    display: flex; align-items: center; justify-content: center;
+    z-index: 1000;
+}
+
+.retro-modal {
+    background: var(--bg-dark);
+    border: 4px solid var(--accent-yellow);
+    width: 500px;
+    max-width: 95%;
+    box-shadow: 10px 10px 0 #000;
+}
+
+.modal-header {
+    background: var(--accent-yellow);
+    color: #000;
+    padding: 10px;
+    text-align: center;
+    font-size: 14px;
+}
+
+.modal-content {
+    padding: 20px;
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.retro-list {
+    padding-left: 20px;
+    margin: 10px 0;
+    list-style-type: square;
+    color: var(--accent-yellow);
+}
+.retro-list li { margin-bottom: 8px; color: var(--text-white); }
+
+/* Animación de parpadeo estilo cursor */
+@keyframes blink { 50% { opacity: 0; } }
+
+/* --- UI DE ADIVINADOR (SLOTS) --- */
+.guesser-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 15px;
+    width: 100%;
+}
+
+.word-slots {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+    flex-wrap: wrap;
+    cursor: text;
+    margin-bottom: 10px;
+}
+
+.slot {
+    width: 40px;
+    height: 50px;
+    border-bottom: 4px solid var(--text-white);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 24px;
+    color: var(--text-white);
+    font-family: 'Press Start 2P', cursive;
+    text-transform: uppercase;
+    transition: all 0.2s;
+}
+
+/* Efecto cuando hay letra escrita */
+.slot.filled {
+    border-color: var(--accent-yellow);
+    color: var(--accent-yellow);
+    text-shadow: 0 0 10px rgba(249, 215, 28, 0.5);
+    transform: translateY(-2px);
+}
+
+/* El input real está ahí, pero invisible */
+.ghost-input {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none; /* Para que el click vaya al slot container */
+    height: 0;
+    width: 0;
+}
+
+/* Ajuste móvil para los slots */
+@media (max-width: 600px) {
+    .slot {
+        width: 25px;
+        height: 35px;
+        font-size: 16px;
+        border-bottom-width: 3px;
+        gap: 5px;
+    }
+}
