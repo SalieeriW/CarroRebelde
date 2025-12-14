@@ -119,6 +119,8 @@ export const Game = ({ preassignedRoom }: GameProps) => {
                 minigamePort = "1000";
             } else if (minigameType === "coop-miner") {
                 minigamePort = "7084";
+            } else if (minigameType === "boxgame2") {
+                minigamePort = "3003";
             } else {
                 console.warn(`Unknown minigame type: ${minigameType}`);
                 return;

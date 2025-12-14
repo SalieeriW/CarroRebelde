@@ -178,7 +178,7 @@ export class GameRoom extends Room<GameState> {
                 }
                 
                 // Available minigames
-                const availableMinigames = ["two-keys-gate", "gomoku-duel", "pictionary", "wordle", "coop-miner"];
+                const availableMinigames = ["two-keys-gate", "gomoku-duel", "pictionary", "wordle", "coop-miner", "boxgame2"];
                 
                 // Find a minigame that hasn't been played yet
                 const unplayedMinigames = availableMinigames.filter(mg => !playedMinigames.includes(mg));
@@ -220,6 +220,9 @@ export class GameRoom extends Room<GameState> {
                         resetPath = `/api/wordle/reset/${this.roomCode}`;
                     } else if (selectedMinigame === "coop-miner") {
                         minigameApiUrl = process.env.COOP_MINER_API_URL || 'http://localhost:7001';
+                        resetPath = `/rooms/${this.roomCode}/reset`;
+                    } else if (selectedMinigame === "boxgame2") {
+                        minigameApiUrl = process.env.BOXGAME2_API_URL || 'http://localhost:8081';
                         resetPath = `/rooms/${this.roomCode}/reset`;
                     } else {
                         throw new Error(`Unknown minigame type: ${selectedMinigame}`);

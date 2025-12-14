@@ -190,6 +190,40 @@ services:
       - PORT=7084
       - VITE_API_URL=http://localhost:7001
 
+  # Boxgame2 minigame server
+  boxgame2-server:
+    build:
+      context: ./minigames/boxgame2/server
+      dockerfile: Dockerfile
+    container_name: boxgame2-server
+    ports:
+      - "8081:8080"
+    networks:
+      - blindrally-net
+    restart: unless-stopped
+    environment:
+      - PORT=8080
+
+  # Boxgame2 minigame client
+  boxgame2-client:
+    build:
+      context: ./minigames/boxgame2/web
+      dockerfile: Dockerfile
+      args:
+        - NEXT_PUBLIC_WS_URL=ws://localhost:8081
+        - NEXT_PUBLIC_BLINDRALLY_SERVER_URL=http://localhost:2567
+    container_name: boxgame2-client
+    ports:
+      - "3003:3000"
+    depends_on:
+      - boxgame2-server
+    networks:
+      - blindrally-net
+    restart: unless-stopped
+    environment:
+      - NEXT_PUBLIC_WS_URL=ws://localhost:8081
+      - NEXT_PUBLIC_BLINDRALLY_SERVER_URL=http://localhost:2567
+
 networks:
   blindrally-net:
     driver: bridge
