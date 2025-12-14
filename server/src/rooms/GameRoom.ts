@@ -1,17 +1,8 @@
 import { Room, Client } from "colyseus";
-import { GameState, Player, Trap, Challenge } from "./schema/GameState";
-
-// Safe words for challenges
-const SAFE_WORDS = [
-    "coche", "sol", "casa", "árbol", "perro", "gato", "estrella", "luna",
-    "flor", "mar", "montaña", "nube", "corazón", "sonrisa", "libro", "pelota",
-    "avión", "barco", "tren", "bicicleta", "helado", "tarta", "regalo", "globo"
-];
+import { GameState, Player, Trap } from "./schema/GameState";
 
 export class GameRoom extends Room<GameState> {
     maxClients = 10; // 2 players + up to 8 spectators (monitors)
-    private challengeTimer: NodeJS.Timeout | null = null;
-    private challengeInterval: NodeJS.Timeout | null = null;
     private trapEffects: Map<string, NodeJS.Timeout> = new Map();
     public roomCode: string = "";
     private trackPoints: Array<{ x: number; z: number }> = [];
@@ -67,40 +58,22 @@ export class GameRoom extends Room<GameState> {
 
         // Input handling
         this.onMessage("input", (client, data) => {
-            console.log("INPUT RECEIVED:", JSON.stringify(data), "GamePhase:", this.state.gamePhase);
-            
             const player = this.state.players.get(client.sessionId);
-            if (!player) {
-                console.log("NO PLAYER FOUND for session:", client.sessionId);
-                return;
-            }
-            
-            console.log("Player role:", player.role);
+            if (!player || player.role !== "driver") return;
 
-            if (player.role === "driver") {
-                // Driver controls both steering and acceleration
-                if (data.steer !== undefined) {
-                    let steerValue = data.steer;
-                    // Invert controls if penalty active
-                    if (this.state.car.controlsInverted) {
-                        steerValue = -steerValue;
-                    }
-                    this.state.car.steeringValue = steerValue;
+            if (data.steer !== undefined) {
+                let steerValue = data.steer;
+                if (this.state.car.controlsInverted) {
+                    steerValue = -steerValue;
                 }
-                if (data.accelerate !== undefined) {
-                    // Set accelerating flag
-                    const oldValue = this.state.car.accelerating;
-                    this.state.car.accelerating = data.accelerate;
-                    console.log("ACCELERATING CHANGED:", oldValue, "->", data.accelerate, "Speed:", this.state.car.speed.toFixed(2));
-                }
-                // Handle collision with cone - set speed to 0
-                if (data.type === "collision") {
-                    this.state.car.speed = 0;
-                    this.state.car.accelerating = false;
-                    console.log("COLLISION: Speed reset to 0");
-                }
-            } else {
-                console.log("NOT DRIVER, role is:", player.role);
+                this.state.car.steeringValue = steerValue;
+            }
+            if (data.accelerate !== undefined) {
+                this.state.car.accelerating = data.accelerate;
+            }
+            if (data.type === "collision") {
+                this.state.car.speed = 0;
+                this.state.car.accelerating = false;
             }
         });
 
@@ -166,7 +139,6 @@ export class GameRoom extends Room<GameState> {
                             this.state.car.angle = Math.atan2(next.x - start.x, next.z - start.z);
                         }
 
-                        console.log("Track circuit received from driver, points:", this.trackPoints.length);
                     }
                 } catch (e) {
                     console.warn("Invalid trackData from driver:", e);
@@ -206,8 +178,6 @@ export class GameRoom extends Room<GameState> {
                 // Stop the car
                 this.state.car.speed = 0;
                 
-                console.log(`🎮 Minigame triggered for ALL players! Session: ${sessionId}`);
-                
                 // DUMMY: Auto-resolve after 3 seconds - ALWAYS WIN for testing
                 setTimeout(() => {
                     if (this.state.minigameActive && this.state.minigameSessionId === sessionId) {
@@ -218,68 +188,14 @@ export class GameRoom extends Room<GameState> {
             }
         });
 
-        // Challenge messages
-        this.onMessage("drawing", (client, data) => {
-            if (this.state.gamePhase !== "challenge") return;
-            const challenge = this.state.challenge;
-
-            if (challenge.phase === "drawing1" && challenge.currentDrawer === client.sessionId) {
-                challenge.drawing1Data = data.canvasData;
-                // Auto-advance to next phase after receiving drawing
-                if (this.challengeTimer) clearTimeout(this.challengeTimer);
-                challenge.phase = "drawing2";
-                const players = Array.from(this.state.players.values());
-                const shuffled = [...players].sort(() => Math.random() - 0.5);
-                challenge.currentDrawer = shuffled[1]?.sessionId || shuffled[0]?.sessionId || "";
-                challenge.timeLeft = 12000;
-                // Restart timer for drawing2
-                this.challengeTimer = setTimeout(() => {
-                    if (challenge.phase === "drawing2") {
-                        challenge.phase = "guessing";
-                        challenge.currentGuesser = shuffled[2]?.sessionId || shuffled[0]?.sessionId || "";
-                        challenge.timeLeft = 10000;
-                        this.challengeTimer = setTimeout(() => {
-                            this.endChallenge();
-                        }, 10000);
-                    }
-                }, 12000);
-            } else if (challenge.phase === "drawing2" && challenge.currentDrawer === client.sessionId) {
-                challenge.drawing2Data = data.canvasData;
-                // Auto-advance to guessing phase
-                if (this.challengeTimer) clearTimeout(this.challengeTimer);
-                challenge.phase = "guessing";
-                const players = Array.from(this.state.players.values());
-                const shuffled = [...players].sort(() => Math.random() - 0.5);
-                challenge.currentGuesser = shuffled[2]?.sessionId || shuffled[0]?.sessionId || "";
-                challenge.timeLeft = 10000;
-                // Restart timer for guessing
-                this.challengeTimer = setTimeout(() => {
-                    this.endChallenge();
-                }, 10000);
-            }
-        });
-
-        this.onMessage("guess", (client, data) => {
-            if (this.state.gamePhase !== "challenge") return;
-            const challenge = this.state.challenge;
-
-            if (challenge.phase === "guessing" && challenge.currentGuesser === client.sessionId) {
-                challenge.guess = data.word || "";
-                this.endChallenge();
-            }
-        });
-
         this.onMessage("start_game", (client, data) => {
             if (this.state.players.size >= 2) {
                 this.state.gamePhase = "playing";
-                this.spawnChallengePortal();
             }
         });
     }
 
     update(deltaTime: number) {
-        // Allow updates even in lobby for testing
-        // if (this.state.gamePhase === "lobby") return;
 
         const car = this.state.car;
         const deltaSeconds = deltaTime / 1000;
@@ -481,16 +397,6 @@ export class GameRoom extends Room<GameState> {
             }
         }
 
-        // Challenge portal collision
-        if (this.state.challengePortalActive && this.state.gamePhase === "playing") {
-            const dx = car.x - this.state.challengePortalX;
-            const dz = car.z - this.state.challengePortalZ;
-            const dist = Math.sqrt(dx * dx + dz * dz);
-
-            if (dist < 3) {
-                this.startChallenge();
-            }
-        }
 
         // Trap spawning (ahead of car)
         if (Math.random() < 0.01 && this.state.gamePhase === "playing") {
@@ -560,116 +466,6 @@ export class GameRoom extends Room<GameState> {
         }
     }
 
-    spawnChallengePortal() {
-        const car = this.state.car;
-        const dist = 30 + Math.random() * 20;
-        const angle = car.angle + (Math.random() - 0.5) * 0.5;
-        this.state.challengePortalX = car.x + Math.sin(angle) * dist;
-        this.state.challengePortalZ = car.z + Math.cos(angle) * dist;
-        this.state.challengePortalActive = true;
-    }
-
-    startChallenge() {
-        if (this.state.players.size < 2) return;
-
-        this.state.gamePhase = "challenge";
-        this.state.challengePortalActive = false;
-        
-        const challenge = this.state.challenge;
-        challenge.active = true;
-        const randomWord = SAFE_WORDS[Math.floor(Math.random() * SAFE_WORDS.length)];
-        challenge.word = randomWord || "coche";
-        challenge.phase = "drawing1";
-        challenge.drawing1Data = "";
-        challenge.drawing2Data = "";
-        challenge.guess = "";
-
-        // Slow down car during challenge
-        this.state.car.speed *= 0.3;
-        // Re-apply speed cap after challenge slowdown - use Math.min to ensure it's always capped
-        this.state.car.speed = Math.min(this.state.car.speed, 100);
-
-        // Assign roles for challenge
-        const players = Array.from(this.state.players.values());
-        const shuffled = [...players].sort(() => Math.random() - 0.5);
-        
-        challenge.currentDrawer = shuffled[0]?.sessionId || "";
-        challenge.timeLeft = 12000; // 12 seconds
-
-        // Start interval to update timeLeft
-        if (this.challengeInterval) clearInterval(this.challengeInterval);
-        this.challengeInterval = setInterval(() => {
-            if (this.state.gamePhase === "challenge" && challenge.active) {
-                challenge.timeLeft = Math.max(0, challenge.timeLeft - 100);
-                if (challenge.timeLeft <= 0 && this.challengeTimer) {
-                    // Timer will handle phase transitions
-                }
-            } else {
-                if (this.challengeInterval) {
-                    clearInterval(this.challengeInterval);
-                    this.challengeInterval = null;
-                }
-            }
-        }, 100);
-
-        // Start timer for drawing1
-        if (this.challengeTimer) clearTimeout(this.challengeTimer);
-        this.challengeTimer = setTimeout(() => {
-            if (challenge.phase === "drawing1") {
-                challenge.phase = "drawing2";
-                challenge.currentDrawer = shuffled[1]?.sessionId || shuffled[0]?.sessionId || "";
-                challenge.timeLeft = 12000;
-                // Start timer for drawing2
-                this.challengeTimer = setTimeout(() => {
-                    if (challenge.phase === "drawing2") {
-                        challenge.phase = "guessing";
-                        challenge.currentGuesser = shuffled[2]?.sessionId || shuffled[0]?.sessionId || "";
-                        challenge.timeLeft = 10000; // 10 seconds to guess
-                        // Start timer for guessing
-                        this.challengeTimer = setTimeout(() => {
-                            this.endChallenge();
-                        }, 10000);
-                    }
-                }, 12000);
-            }
-        }, 12000);
-    }
-
-    endChallenge() {
-        const challenge = this.state.challenge;
-        const correct = challenge.guess.toLowerCase().trim() === challenge.word.toLowerCase().trim();
-
-        if (this.challengeTimer) {
-            clearTimeout(this.challengeTimer);
-            this.challengeTimer = null;
-        }
-
-        if (this.challengeInterval) {
-            clearInterval(this.challengeInterval);
-            this.challengeInterval = null;
-        }
-
-        if (correct) {
-            // TURBO!
-            this.state.car.turboActive = true;
-            this.state.car.turboTimeLeft = 10000; // 10 seconds
-        } else {
-            // PENALTY
-            this.state.car.controlsInverted = true;
-            this.state.car.controlsInvertedTimeLeft = 8000;
-            this.state.car.cameraCrazy = true;
-            this.state.car.cameraCrazyTimeLeft = 8000;
-            this.state.radioStation = "absurd1";
-        }
-
-        challenge.active = false;
-        this.state.gamePhase = "playing";
-        
-        // Spawn new portal
-        setTimeout(() => {
-            this.spawnChallengePortal();
-        }, 5000);
-    }
 
     onJoin(client: Client, options: any) {
         try {
@@ -721,7 +517,6 @@ export class GameRoom extends Room<GameState> {
             if (hasDriver && hasNavigator && this.state.gamePhase === 'lobby') {
                 console.log("🚀 Auto-starting game - both players ready!");
                 this.state.gamePhase = 'playing';
-                this.spawnChallengePortal();
             }
         } catch (error) {
             console.error("Error in onJoin:", error);
@@ -751,13 +546,6 @@ export class GameRoom extends Room<GameState> {
         // Remove room from global map
         if ((global as any).activeRooms) {
             (global as any).activeRooms.delete(this.roomId);
-        }
-        
-        if (this.challengeTimer) {
-            clearTimeout(this.challengeTimer);
-        }
-        if (this.challengeInterval) {
-            clearInterval(this.challengeInterval);
         }
     }
 
@@ -884,12 +672,7 @@ export class GameRoom extends Room<GameState> {
 
     // Resolve minigame result (called by HTTP endpoint or dummy timer)
     public resolveMinigame(won: boolean) {
-        console.log(`🎮 resolveMinigame called, won=${won}, minigameActive=${this.state.minigameActive}`);
-        
-        if (!this.state.minigameActive) {
-            console.log("❌ Minigame not active, skipping");
-            return;
-        }
+        if (!this.state.minigameActive) return;
         
         this.state.minigameResult = won ? "won" : "lost";
         
@@ -899,9 +682,6 @@ export class GameRoom extends Room<GameState> {
             this.state.car.clarityTimeLeft = 8000; // 8 seconds
             this.state.car.speedBoostActive = true;
             this.state.car.speedBoostTimeLeft = 8000; // 8 seconds of speed boost
-            console.log(`🏆 Minigame WON! clarityActive=${this.state.car.clarityActive}, clarityTimeLeft=${this.state.car.clarityTimeLeft}`);
-        } else {
-            console.log(`❌ Minigame LOST!`);
         }
         
         // Reposition car to center of track and freeze controls
@@ -920,7 +700,6 @@ export class GameRoom extends Room<GameState> {
             // Reset controls again just to be safe
             this.state.car.steeringValue = 0;
             this.state.car.speed = 0;
-            console.log("🎮 Minigame ended, car repositioned, ready to continue!");
         }, 3000);
     }
     

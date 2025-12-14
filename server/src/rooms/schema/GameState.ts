@@ -35,27 +35,11 @@ export class Trap extends Schema {
     @type("number") duration: number = 5000; // milliseconds
 }
 
-export class Challenge extends Schema {
-    @type("string") word: string = "";
-    @type("string") phase: string = "waiting"; // waiting, drawing1, drawing2, guessing
-    @type("string") currentDrawer: string = ""; // sessionId
-    @type("string") currentGuesser: string = ""; // sessionId
-    @type("number") timeLeft: number = 0; // milliseconds
-    @type("string") drawing1Data: string = ""; // base64 canvas data
-    @type("string") drawing2Data: string = ""; // base64 canvas data
-    @type("string") guess: string = "";
-    @type("boolean") active: boolean = false;
-}
-
 export class GameState extends Schema {
     @type({ map: Player }) players = new MapSchema<Player>();
     @type({ map: Trap }) traps = new MapSchema<Trap>();
     @type(Car) car = new Car();
-    @type("string") gamePhase: string = "lobby"; // lobby, playing, challenge, finished
-    @type(Challenge) challenge = new Challenge();
-    @type("number") challengePortalX: number = 0;
-    @type("number") challengePortalZ: number = 0;
-    @type("boolean") challengePortalActive: boolean = false;
+    @type("string") gamePhase: string = "lobby"; // lobby, playing, finished
     @type("string") radioStation: string = "normal"; // normal, absurd1, absurd2
     @type("boolean") hornActive: boolean = false;
     @type("boolean") bgmEnabled: boolean = true; // BGM toggle (controlled by navigator, affects both)
